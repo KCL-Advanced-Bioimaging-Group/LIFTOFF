@@ -11,7 +11,7 @@ authors:
  given-names: "Susan"
  orcid: "https://orcid.org/0000-0001-8322-1981"
 Title: "LIFTOFF: Leica Imaging Files Translated in Open File Formats"
-version 1.0.0
+version: 1.0.0
 doi:
 date-released: 2026-11-13
 url: "https://github.com/KCL-Advanced-Bioimaging-Group/LIFTOFF"
