@@ -1,15 +1,15 @@
 cff-version 1.2.0
 message: "IF you use this software, please cite it as below"
 authors:
- -family-names: "Pallett"
-  given-names: "Tommy Lee"
-  orcid: "https://orcid.org/0000-0002-0324-9982"
- -family-names: "Ameer-Beg"
-  given-names: "Simon Morris"
-  orcid: "https://orcid.org/0000-0001-5227-575X"
- -family-names: "Cox"
-  given-names: "Susan"
-  orcid: "https://orcid.org/0000-0001-8322-1981"
+-family-names: "Pallett"
+ given-names: "Tommy Lee"
+ orcid: "https://orcid.org/0000-0002-0324-9982"
+-family-names: "Ameer-Beg"
+ given-names: "Simon Morris"
+ orcid: "https://orcid.org/0000-0001-5227-575X"
+-family-names: "Cox"
+ given-names: "Susan"
+ orcid: "https://orcid.org/0000-0001-8322-1981"
 Title: "LIFTOFF: Leica Imaging Files Translated in Open File Formats"
 version 1.0.0
 doi:
