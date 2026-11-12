@@ -1,6 +1,6 @@
 cff-version 1.2.0
 message: "IF you use this software, please cite it as below"
-Title: "LIFTOFF: Leica Imaging Files Translated in Open File Formats"
+
 authors:
  -family-names: "Pallett"
   given-names: "Tommy Lee"
@@ -11,9 +11,8 @@ authors:
  -family-names: "Cox"
   given-names: "Susan"
   orcid: "https://orcid.org/0000-0001-8322-1981"
+Title: "LIFTOFF: Leica Imaging Files Translated in Open File Formats"
 version 1.0.0
-identifiers:
- -type: doi
-  value:
+doi:
 date-released: 2026-11-13
 url: "https://github.com/KCL-Advanced-Bioimaging-Group/LIFTOFF"
