@@ -6,7 +6,7 @@ authors:
     given-names: "Tommy Lee"
     orcid: "https://orcid.org/0000-0002-0324-9982"
 
-   - family-names: "Dubois"
+  - family-names: "Dubois"
     given-names: "Camille"
     orcid: "https://orcid.org/0009-0006-6403-5757"
 
@@ -26,3 +26,5 @@ title: "LIFTOFF: Leica Imaging Files Translated in Open File Formats"
 version: "1.0.0"
 date-released: 2026-11-13
 url: "https://github.com/KCL-Advanced-Bioimaging-Group/LIFTOFF"
+license: GPL-3.0-only
+repository-code: "https://github.com/KCL-Advanced-Bioimaging-Group/LIFTOFF"
