@@ -1,0 +1,4 @@
+interface:
+  display_name: "LIFTOFF Release Audit"
+  short_description: "Audit, rebuild, and verify LIFTOFF releases"
+  default_prompt: "Use $leica-release-audit to audit this project for its next release and report blockers before rebuilding the standalone executable."

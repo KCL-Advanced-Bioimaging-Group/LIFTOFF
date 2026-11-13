@@ -22,8 +22,7 @@ authors:
     given-names: "Simon Morris"
     orcid: "https://orcid.org/0000-0001-5227-575X"
 
-title: "LIFTOFF: Leica Imaging Files Translated in Open File Formats"
-version: "1.0.0"
-date-released: 2026-11-13
+title: "LIFTOFF: Leica Image Files Translated into Open File Formats"
+version: "3.2.2"
 license: GPL-3.0-only
 repository-code: "https://github.com/KCL-Advanced-Bioimaging-Group/LIFTOFF"

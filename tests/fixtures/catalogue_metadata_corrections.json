@@ -1,0 +1,44 @@
+{
+  "PL109 R72C CC CCCP NH4Cl.lif": {
+    "MemBlock_9267": {
+      "pixel_size_x_m": 4.814710371819961e-7,
+      "pixel_size_y_m": 4.814710371819961e-7,
+      "channel_name": "460 - 501 nm",
+      "detector_name": "HyD S 2",
+      "detector_identifier": "2",
+      "emission_filter_band": "460 - 501 nm"
+    },
+    "MemBlock_9346": {
+      "pixel_size_x_m": 4.814710371819961e-7,
+      "pixel_size_y_m": 4.814710371819961e-7,
+      "channel_name": "461 - 501 nm",
+      "detector_name": "HyD S 2",
+      "detector_identifier": "2",
+      "emission_filter_band": "461 - 501 nm"
+    },
+    "MemBlock_9414": {
+      "pixel_size_x_m": 4.814710371819961e-7,
+      "pixel_size_y_m": 4.814710371819961e-7,
+      "channel_name": "461 - 501 nm",
+      "detector_name": "HyD S 2",
+      "detector_identifier": "2",
+      "emission_filter_band": "461 - 501 nm"
+    },
+    "MemBlock_9511": {
+      "pixel_size_x_m": 1.0,
+      "pixel_size_y_m": 1.0,
+      "channel_name": "461 - 501 nm",
+      "detector_name": "HyD S 2",
+      "detector_identifier": "2",
+      "emission_filter_band": "461 - 501 nm"
+    },
+    "MemBlock_9589": {
+      "pixel_size_x_m": 4.814710371819961e-7,
+      "pixel_size_y_m": 4.814710371819961e-7,
+      "channel_name": "461 - 501 nm",
+      "detector_name": "HyD S 2",
+      "detector_identifier": "2",
+      "emission_filter_band": "461 - 501 nm"
+    }
+  }
+}

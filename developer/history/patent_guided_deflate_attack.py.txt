@@ -1,0 +1,1288 @@
+#!/usr/bin/env python3
+"""Patent-guided attack on Leica's grouped FLIM Deflate stream.
+
+The Leica patent US20230344447 describes sorted arrival-time differences,
+8-bit class/photon/escape/pixel markers, and Deflate entropy coding without
+LZ matches. This script parses Deflate at bit level, recovers all valid leading
+blocks, scans for independently framed streams, and compares decoded token
+statistics with the matched PTU photon oracle.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import math
+import struct
+from collections import Counter
+from pathlib import Path
+
+import numpy as np
+
+LENGTH_BASE = [
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    13,
+    15,
+    17,
+    19,
+    23,
+    27,
+    31,
+    35,
+    43,
+    51,
+    59,
+    67,
+    83,
+    99,
+    115,
+    131,
+    163,
+    195,
+    227,
+    258,
+]
+LENGTH_EXTRA = [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    2,
+    3,
+    3,
+    3,
+    3,
+    4,
+    4,
+    4,
+    4,
+    5,
+    5,
+    5,
+    5,
+    0,
+]
+DIST_BASE = [
+    1,
+    2,
+    3,
+    4,
+    5,
+    7,
+    9,
+    13,
+    17,
+    25,
+    33,
+    49,
+    65,
+    97,
+    129,
+    193,
+    257,
+    385,
+    513,
+    769,
+    1025,
+    1537,
+    2049,
+    3073,
+    4097,
+    6145,
+    8193,
+    12289,
+    16385,
+    24577,
+]
+DIST_EXTRA = [
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    2,
+    2,
+    3,
+    3,
+    4,
+    4,
+    5,
+    5,
+    6,
+    6,
+    7,
+    7,
+    8,
+    8,
+    9,
+    9,
+    10,
+    10,
+    11,
+    11,
+    12,
+    12,
+    13,
+    13,
+]
+CODE_ORDER = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
+
+
+class DeflateError(Exception):
+    pass
+
+
+class BitReader:
+    def __init__(self, data: bytes, bitpos: int = 0, limit: int | None = None):
+        self.data = data
+        self.pos = bitpos
+        self.limit = (
+            len(data) * 8 if limit is None else min(limit, len(data) * 8)
+        )
+
+    def read(self, count: int) -> int:
+        if self.pos + count > self.limit:
+            raise DeflateError("end of input")
+        byte = self.pos >> 3
+        shift = self.pos & 7
+        needed = (shift + count + 7) >> 3
+        value = 0
+        for index in range(needed):
+            value |= self.data[byte + index] << (index * 8)
+        value = (value >> shift) & ((1 << count) - 1)
+        self.pos += count
+        return value
+
+    def peek(self, count: int) -> int:
+        """Read up to ``count`` low-order stream bits without advancing."""
+        available = min(count, self.limit - self.pos)
+        if available <= 0:
+            return 0
+        byte = self.pos >> 3
+        shift = self.pos & 7
+        needed = (shift + available + 7) >> 3
+        value = 0
+        for index in range(needed):
+            value |= self.data[byte + index] << (index * 8)
+        return (value >> shift) & ((1 << available) - 1)
+
+    def align_byte(self) -> None:
+        self.pos = (self.pos + 7) & ~7
+
+
+def reverse_bits(value: int, width: int) -> int:
+    result = 0
+    for _ in range(width):
+        result = (result << 1) | (value & 1)
+        value >>= 1
+    return result
+
+
+def huffman(lengths: list[int], allow_empty: bool = False):
+    maximum = max(lengths, default=0)
+    if maximum == 0:
+        if allow_empty:
+            return {}, 0
+        raise DeflateError("empty Huffman alphabet")
+    counts = [0] * (maximum + 1)
+    for length in lengths:
+        if length:
+            counts[length] += 1
+    code, next_code = 0, [0] * (maximum + 1)
+    for bits in range(1, maximum + 1):
+        code = (code + counts[bits - 1]) << 1
+        next_code[bits] = code
+    codes = []
+    for symbol, length in enumerate(lengths):
+        if length:
+            canonical = next_code[length]
+            next_code[length] += 1
+            codes.append((reverse_bits(canonical, length), length, symbol))
+    # Deflate codes are at most 15 bits. Expanding short codes into a complete
+    # low-bit lookup table replaces the former per-symbol bit loop and dict
+    # probes with one indexed lookup.
+    symbols = [-1] * (1 << maximum)
+    widths = [0] * (1 << maximum)
+    for code, length, symbol in codes:
+        for index in range(code, 1 << maximum, 1 << length):
+            symbols[index] = symbol
+            widths[index] = length
+    return (symbols, widths), maximum
+
+
+def decode_symbol(reader: BitReader, table, maximum: int) -> int:
+    symbols, widths = table
+    index = reader.peek(maximum)
+    width = widths[index]
+    if not width or reader.pos + width > reader.limit:
+        raise DeflateError("invalid Huffman code")
+    reader.pos += width
+    return symbols[index]
+
+
+def fixed_tables():
+    literal_lengths = ([8] * 144) + ([9] * 112) + ([7] * 24) + ([8] * 8)
+    return huffman(literal_lengths), huffman([5] * 32)
+
+
+def dynamic_tables(reader: BitReader):
+    hlit, hdist, hclen = (
+        reader.read(5) + 257,
+        reader.read(5) + 1,
+        reader.read(4) + 4,
+    )
+    code_lengths = [0] * 19
+    for symbol in CODE_ORDER[:hclen]:
+        code_lengths[symbol] = reader.read(3)
+    code_table, code_max = huffman(code_lengths)
+    result = []
+    while len(result) < hlit + hdist:
+        symbol = decode_symbol(reader, code_table, code_max)
+        if symbol <= 15:
+            result.append(symbol)
+        elif symbol == 16:
+            if not result:
+                raise DeflateError("repeat without previous code")
+            result.extend([result[-1]] * (reader.read(2) + 3))
+        elif symbol == 17:
+            result.extend([0] * (reader.read(3) + 3))
+        elif symbol == 18:
+            result.extend([0] * (reader.read(7) + 11))
+        if len(result) > hlit + hdist:
+            raise DeflateError("code-length repeat overflow")
+    return (
+        huffman(result[:hlit]),
+        huffman(result[hlit:], allow_empty=True),
+        {
+            "hlit": hlit,
+            "hdist": hdist,
+            "hclen": hclen,
+            "literalCodeLengths": result[:hlit],
+            "distanceCodeLengths": result[hlit:],
+        },
+    )
+
+
+def parse_deflate(
+    data: bytes,
+    start_bit: int,
+    limit_bit: int | None = None,
+    initial_output: bytes = b"",
+    max_blocks: int = 10000,
+    max_output: int = 10_000_000,
+) -> dict:
+    reader = BitReader(data, start_bit, limit_bit)
+    output = bytearray(initial_output)
+    blocks, error = [], None
+    try:
+        for _ in range(max_blocks):
+            block_start = reader.pos
+            final, block_type = reader.read(1), reader.read(2)
+            literals, matches, match_bytes = 0, 0, 0
+            dynamic = None
+            if block_type == 0:
+                reader.align_byte()
+                length, inverse = reader.read(16), reader.read(16)
+                if (length ^ 0xFFFF) != inverse:
+                    raise DeflateError("invalid stored block lengths")
+                for _ in range(length):
+                    output.append(reader.read(8))
+                literals = length
+            elif block_type in (1, 2):
+                if block_type == 1:
+                    literal_table, distance_table = fixed_tables()
+                else:
+                    literal_table, distance_table, dynamic = dynamic_tables(
+                        reader
+                    )
+                lit_map, lit_max = literal_table
+                dist_map, dist_max = distance_table
+                while True:
+                    symbol = decode_symbol(reader, lit_map, lit_max)
+                    if symbol < 256:
+                        output.append(symbol)
+                        literals += 1
+                        if len(output) > max_output:
+                            raise DeflateError("output limit")
+                    elif symbol == 256:
+                        break
+                    elif 257 <= symbol <= 285:
+                        index = symbol - 257
+                        length = LENGTH_BASE[index] + reader.read(
+                            LENGTH_EXTRA[index]
+                        )
+                        if dist_max == 0:
+                            raise DeflateError(
+                                "length symbol with empty distance alphabet"
+                            )
+                        distance_symbol = decode_symbol(
+                            reader, dist_map, dist_max
+                        )
+                        if distance_symbol >= len(DIST_BASE):
+                            raise DeflateError("reserved distance symbol")
+                        distance = DIST_BASE[distance_symbol] + reader.read(
+                            DIST_EXTRA[distance_symbol]
+                        )
+                        if distance > len(output):
+                            raise DeflateError("distance beyond output")
+                        for _ in range(length):
+                            output.append(output[-distance])
+                            if len(output) > max_output:
+                                raise DeflateError("output limit")
+                        matches += 1
+                        match_bytes += length
+                    else:
+                        raise DeflateError("reserved literal/length symbol")
+            else:
+                raise DeflateError("reserved block type")
+            blocks.append(
+                {
+                    "startBit": block_start,
+                    "endBit": reader.pos,
+                    "final": final,
+                    "type": block_type,
+                    "literals": literals,
+                    "matches": matches,
+                    "matchBytes": match_bytes,
+                    "outputBytes": len(output),
+                    "dynamic": dynamic,
+                }
+            )
+            if final:
+                break
+    except DeflateError as exc:
+        error = {"bit": reader.pos, "message": str(exc)}
+    return {
+        "startBit": start_bit,
+        "endBit": reader.pos,
+        "blocks": blocks,
+        "output": bytes(output[len(initial_output) :]),
+        "error": error,
+        "final": bool(blocks and blocks[-1]["final"] and error is None),
+    }
+
+
+def load_container_bytes(data: bytes):
+    """Parse an extracted Leica FLIM Compressed MemBlock from memory."""
+    header = struct.unpack_from("<8Q", data, 0)
+    stream_start = int(header[1])
+    stream = data[stream_start : stream_start + int(header[2])]
+    table_start = stream_start + int(header[2])
+    table = data[table_start : table_start + int(header[3])]
+    # The table is exactly 800 groups x 66 descriptors. header[5] is the
+    # 51,200 normal-row count, not the total descriptor count.
+    values = np.frombuffer(table, dtype="<u4")
+    # Descriptor words use the top two bits as type flags and the remaining
+    # 30 bits as a bit length. The original sparse IRF happened to need only
+    # 16 length bits; dense rows in later acquisitions exercise the upper 14.
+    lengths = np.asarray(
+        [int(value) & 0x3FFFFFFF for value in values], dtype=np.int64
+    )
+    flags = np.asarray(
+        [(int(value) >> 16) & 0xC000 for value in values], dtype=np.int64
+    )
+    return header, stream, lengths, flags
+
+
+def load_container(path: Path):
+    return load_container_bytes(path.read_bytes())
+
+
+def decode_descriptor_rows(
+    stream: bytes,
+    lengths: np.ndarray,
+    flags: np.ndarray,
+    row_callback=None,
+    keep_rows: bool = True,
+):
+    rows, groups, errors = [], [], []
+    cursor, base, group, line_number = 0, 0, 0, 0
+    while base < len(lengths):
+        if int(flags[base]) != 0:
+            raise ValueError(
+                f"Descriptor group {group} starts with flag 0x{int(flags[base]):04x}"
+            )
+        next_base = base + 1
+        while next_base < len(lengths) and int(flags[next_base]) != 0:
+            next_base += 1
+        group_lengths = lengths[base:next_base]
+        group_flags = flags[base:next_base]
+        if len(group_lengths) < 3:
+            raise ValueError(f"Descriptor group {group} has no row payload")
+        start, end = cursor, cursor + int(group_lengths.sum())
+        reader = BitReader(stream, start, end)
+        try:
+            wrapper = bytes((reader.read(8), reader.read(8)))
+            final, block_type = reader.read(1), reader.read(2)
+            if block_type != 2:
+                raise DeflateError(
+                    f"expected dynamic Huffman block, got {block_type}"
+                )
+            literal_table, distance_table, dynamic = dynamic_tables(reader)
+            header_bits = reader.pos - start - 16
+            expected_header = int(group_lengths[1])
+            if header_bits != expected_header:
+                raise DeflateError(
+                    f"dynamic header used {header_bits}, descriptor says {expected_header}"
+                )
+            if int(group_flags[0]) != 0 or int(group_flags[1]) != 0xC000:
+                raise DeflateError("unexpected control descriptor flags")
+            lit_map, lit_max = literal_table
+            group_output = 0
+            for rel in range(2, len(group_lengths)):
+                segment_start = reader.pos
+                segment_end = segment_start + int(group_lengths[rel])
+                segment_reader = BitReader(stream, segment_start, segment_end)
+                tokens, eob = bytearray(), 0
+                while segment_reader.pos < segment_end:
+                    symbol = decode_symbol(segment_reader, lit_map, lit_max)
+                    if symbol < 256:
+                        tokens.append(symbol)
+                    elif symbol == 256:
+                        eob += 1
+                    else:
+                        raise DeflateError(
+                            f"row contains length symbol {symbol}"
+                        )
+                if segment_reader.pos != segment_end:
+                    raise DeflateError(
+                        "row codeword crosses descriptor boundary"
+                    )
+                reader.pos = segment_end
+                group_output += len(tokens)
+                row = {
+                    "line": line_number,
+                    "group": group,
+                    "rel": rel - 2,
+                    "compressedBits": int(group_lengths[rel]),
+                    "tokens": bytes(tokens),
+                    "eob": eob,
+                }
+                if row_callback is not None:
+                    row_callback(row)
+                if keep_rows:
+                    rows.append(row)
+                line_number += 1
+            groups.append(
+                {
+                    "group": group,
+                    "startBit": start,
+                    "endBit": end,
+                    "wrapper": wrapper.hex(),
+                    "final": final,
+                    "headerBits": header_bits,
+                    "outputBytes": group_output,
+                    "literalAlphabet": sum(
+                        bool(value) for value in dynamic["literalCodeLengths"]
+                    ),
+                    "distanceAlphabet": sum(
+                        bool(value) for value in dynamic["distanceCodeLengths"]
+                    ),
+                }
+            )
+        except DeflateError as exc:
+            errors.append(
+                {"group": group, "bit": reader.pos, "message": str(exc)}
+            )
+        cursor = end
+        base = next_base
+        group += 1
+    return rows, groups, errors, cursor
+
+
+def decode_event_classes(
+    rows: list[dict], class_markers: set[int]
+) -> list[dict]:
+    """Decode pixel runs and sorted arrival-time deltas for selected classes."""
+    return [
+        {"line": line, "x": x, "dt": dt, "class": marker}
+        for line, x, dt, marker in iter_event_tuples(rows, class_markers)
+    ]
+
+
+def iter_event_tuples(rows: list[dict], class_markers: set[int]):
+    """Yield ``(line, x, microtime, class)`` without allocating event dicts."""
+    for row in rows:
+        x, index, tokens = 0, 0, row["tokens"]
+        while index < len(tokens):
+            token = tokens[index]
+            if 0x81 <= token <= 0x9F:
+                x += token & 0x1F
+                index += 1
+                continue
+            if token not in class_markers:
+                index += 1
+                continue
+            marker = token
+            index += 1
+            deltas = []
+            while index < len(tokens):
+                token = tokens[index]
+                if token < 0x80:
+                    deltas.append(token)
+                    index += 1
+                elif (
+                    0xC0 <= token <= 0xFF
+                    and index + 1 < len(tokens)
+                    and tokens[index + 1] < 0x80
+                ):
+                    deltas.append(((token & 0x3F) << 7) | tokens[index + 1])
+                    index += 2
+                else:
+                    break
+            arrival = 0
+            for event_index, delta in enumerate(deltas):
+                arrival = delta if event_index == 0 else arrival + delta
+                yield row["line"], x, arrival, marker
+
+
+def event_multisets(events: list[dict], line_count: int) -> list[Counter]:
+    result = [Counter() for _ in range(line_count)]
+    for event in events:
+        result[event["line"]][(event["x"], event["dt"])] += 1
+    return result
+
+
+def write_ptu_from_events(
+    template: Path,
+    target: Path,
+    events: list[dict],
+    line_count: int,
+    line_span: int = 1536,
+) -> int:
+    """Write PicoHarp T3 records with exact x/dtime and synthetic 3-tick pixels."""
+    import generative_row_codec_attack as common
+
+    template_data = template.read_bytes()
+    header_end = common.ptu_data_offset(template_data)
+    header = bytearray(template_data[:header_end])
+    by_line: list[list[dict]] = [[] for _ in range(line_count)]
+    for event in events:
+        by_line[event["line"]].append(event)
+    records, current_wrap = [], 0
+
+    def ensure_wrap(sync: int) -> None:
+        nonlocal current_wrap
+        target_wrap = sync // 65536
+        if target_wrap > current_wrap:
+            records.append((15 << 28) | (target_wrap - current_wrap))
+            current_wrap = target_wrap
+
+    for line, line_events in enumerate(by_line):
+        start = line * line_span
+        ensure_wrap(start)
+        records.append((15 << 28) | (1 << 16) | (start & 0xFFFF))
+        for event in sorted(
+            line_events, key=lambda item: (item["x"], item["dt"])
+        ):
+            sync = start + event["x"] * 3
+            ensure_wrap(sync)
+            records.append((int(event["dt"]) << 16) | (sync & 0xFFFF))
+        end = start + line_span
+        ensure_wrap(end)
+        records.append((15 << 28) | (2 << 16) | (end & 0xFFFF))
+
+    offset = 16
+    variable_types = {0x4001FFFF, 0x4002FFFF, 0xFFFFFFFF, 0x2001FFFF}
+    while offset + 48 <= len(header):
+        ident = (
+            header[offset : offset + 32].split(b"\0", 1)[0].decode("latin1")
+        )
+        typ = struct.unpack_from("<I", header, offset + 36)[0]
+        value = struct.unpack_from("<q", header, offset + 40)[0]
+        if ident == "TTResult_NumberOfRecords":
+            struct.pack_into("<q", header, offset + 40, len(records))
+        offset += 48 + (int(value) if typ in variable_types else 0)
+        if ident == "Header_End":
+            break
+    target.write_bytes(
+        bytes(header) + np.asarray(records, dtype="<u4").tobytes()
+    )
+    return len(records)
+
+
+def zlib_headers(stream: bytes) -> list[int]:
+    result = []
+    for offset in range(len(stream) - 1):
+        cmf, flg = stream[offset], stream[offset + 1]
+        if (
+            (cmf & 0x0F) == 8
+            and (cmf >> 4) <= 7
+            and ((cmf << 8) + flg) % 31 == 0
+        ):
+            result.append(offset)
+    return result
+
+
+def parse_zlib_candidate(stream: bytes, offset: int) -> dict:
+    if offset + 2 > len(stream):
+        return {"offset": offset, "valid": False}
+    cmf, flg = stream[offset], stream[offset + 1]
+    start = (offset + 2) * 8
+    if flg & 0x20:
+        start += 32
+    parsed = parse_deflate(stream, start)
+    return {
+        "offset": offset,
+        "cmf": cmf,
+        "flg": flg,
+        "deflateStartBit": start,
+        "endBit": parsed["endBit"],
+        "blockCount": len(parsed["blocks"]),
+        "outputBytes": len(parsed["output"]),
+        "final": parsed["final"],
+        "error": parsed["error"],
+        "blocks": parsed["blocks"],
+        "output": parsed["output"],
+    }
+
+
+def token_metrics(data: bytes) -> dict:
+    counts = Counter(data)
+    high = sum(value >= 0x80 for value in data)
+    low7 = Counter(value & 0x7F for value in data)
+    return {
+        "bytes": len(data),
+        "unique": len(counts),
+        "highBitFraction": high / len(data) if data else 0.0,
+        "topBytes": [
+            [f"0x{value:02x}", count]
+            for value, count in counts.most_common(20)
+        ],
+        "topLow7": [[value, count] for value, count in low7.most_common(20)],
+    }
+
+
+def scan_literal_blocks(stream: bytes) -> list[dict]:
+    """Find independently decodable dynamic-Huffman, literal-only blocks."""
+    result = []
+    total_bits = len(stream) * 8
+    for bit in range(0, total_bits - 32):
+        # BTYPE=2 occupies the two bits after BFINAL in LSB-first order.
+        if ((stream[(bit + 1) >> 3] >> ((bit + 1) & 7)) & 1) != 0:
+            continue
+        if ((stream[(bit + 2) >> 3] >> ((bit + 2) & 7)) & 1) != 1:
+            continue
+        parsed = parse_deflate(stream, bit, max_blocks=1, max_output=20_000)
+        if not parsed["blocks"]:
+            continue
+        block = parsed["blocks"][0]
+        output = parsed["output"]
+        if block["type"] != 2 or block["matches"] != 0 or len(output) < 8:
+            continue
+        high_fraction = sum(value >= 0x80 for value in output) / len(output)
+        if high_fraction < 0.70:
+            continue
+        result.append(
+            {
+                "startBit": bit,
+                "endBit": block["endBit"],
+                "compressedBits": block["endBit"] - bit,
+                "outputBytes": len(output),
+                "highBitFraction": high_fraction,
+                "uniqueBytes": len(set(output)),
+                "final": block["final"],
+                "output": output,
+            }
+        )
+    return result
+
+
+def main() -> None:
+    import generative_row_codec_attack as common
+    import raw_line_clock_spatial_attack as raw_clock
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--lif-block",
+        type=Path,
+        default=Path("outputs/MemBlock_2699_FLIM_Compressed.bin"),
+    )
+    parser.add_argument("--ptu", type=Path, required=True)
+    parser.add_argument("--out", type=Path, default=Path("outputs"))
+    parser.add_argument(
+        "--scan",
+        action="store_true",
+        help="Also run the slow all-bit block scanner",
+    )
+    args = parser.parse_args()
+    args.out.mkdir(parents=True, exist_ok=True)
+
+    header, stream, lengths, flags = load_container(args.lif_block)
+    macro_lines = raw_clock.decode_ptu_macro_lines(args.ptu)
+    ptu_events = [event for line in macro_lines for event in line["events"]]
+    ptu_dt = Counter(event["dt"] for event in ptu_events)
+    headers = zlib_headers(stream)
+    candidates = [parse_zlib_candidate(stream, offset) for offset in headers]
+    candidates.sort(
+        key=lambda item: (
+            not item["final"],
+            -item["outputBytes"],
+            item["offset"],
+        )
+    )
+
+    leading = parse_zlib_candidate(stream, 0)
+    decoded_rows, decoded_groups, decode_errors, consumed_bits = (
+        decode_descriptor_rows(stream, lengths, flags)
+    )
+    primary_events = decode_event_classes(decoded_rows, {0xA0, 0xA8, 0xB0})
+    reference_events = decode_event_classes(decoded_rows, {0xB8})
+    scanned_blocks = scan_literal_blocks(stream) if args.scan else []
+    recovered = bytearray()
+    accepted_streams = []
+    occupied_until = -1
+    for candidate in sorted(candidates, key=lambda item: item["offset"]):
+        if not candidate["final"] or candidate["outputBytes"] == 0:
+            continue
+        end_byte = math.ceil(candidate["endBit"] / 8) + 4
+        if candidate["offset"] < occupied_until:
+            continue
+        accepted_streams.append(candidate)
+        recovered.extend(candidate["output"])
+        occupied_until = end_byte
+
+    descriptor_bits = int(lengths.sum())
+    group_lengths = [
+        int(lengths[start : start + 66].sum())
+        for start in range(0, len(lengths), 66)
+    ]
+    decoded_metrics = token_metrics(bytes(recovered))
+    leading_metrics = token_metrics(leading["output"])
+    literal_blocks = [
+        block for candidate in candidates for block in candidate["blocks"]
+    ]
+    total_literals = sum(block["literals"] for block in literal_blocks)
+    total_match_bytes = sum(block["matchBytes"] for block in literal_blocks)
+
+    # Patent prediction: low seven bits are sorted-time deltas. Compare their
+    # distribution with PTU forward differences after sorting within each line.
+    ptu_deltas = Counter()
+    for line in macro_lines:
+        ordered = sorted(event["dt"] for event in line["events"])
+        previous = 0
+        for value in ordered:
+            ptu_deltas[value - previous] += 1
+            previous = value
+    recovered_low7 = Counter(
+        value & 0x7F for value in recovered if value < 0x80
+    )
+    keys = sorted(set(ptu_deltas) | set(recovered_low7))
+    left = np.asarray([ptu_deltas[key] for key in keys], dtype=float)
+    right = np.asarray([recovered_low7[key] for key in keys], dtype=float)
+    delta_corr = (
+        float(np.corrcoef(left, right)[0, 1])
+        if len(keys) > 1 and left.std() and right.std()
+        else 0.0
+    )
+
+    row_count = min(len(decoded_rows), len(macro_lines))
+    ptu_counts = np.asarray(
+        [len(macro_lines[i]["events"]) for i in range(row_count)], dtype=int
+    )
+    token_counts = np.asarray(
+        [len(decoded_rows[i]["tokens"]) for i in range(row_count)], dtype=int
+    )
+    low_counts = np.asarray(
+        [
+            sum(value < 0x80 for value in decoded_rows[i]["tokens"])
+            for i in range(row_count)
+        ],
+        dtype=int,
+    )
+    count_corr = (
+        float(np.corrcoef(ptu_counts, low_counts)[0, 1])
+        if ptu_counts.std() and low_counts.std()
+        else 0.0
+    )
+    count_exact = (
+        float(np.mean(ptu_counts == low_counts)) if row_count else 0.0
+    )
+    event_exact = (
+        float(
+            np.mean(ptu_counts[ptu_counts > 0] == low_counts[ptu_counts > 0])
+        )
+        if np.any(ptu_counts > 0)
+        else 0.0
+    )
+    sequence_by_count = {}
+    for count in range(5):
+        sequences = Counter(
+            decoded_rows[i]["tokens"].hex()
+            for i in range(row_count)
+            if ptu_counts[i] == count
+        )
+        sequence_by_count[str(count)] = [
+            [sequence, frequency]
+            for sequence, frequency in sequences.most_common(10)
+        ]
+
+    direct_pairs, cumulative_pairs = [], []
+    for i in range(row_count):
+        low = [value for value in decoded_rows[i]["tokens"] if value < 0x80]
+        target = sorted(event["dt"] for event in macro_lines[i]["events"])
+        if len(low) != len(target) or not target:
+            continue
+        direct_pairs.extend(zip(low, target))
+        cumulative_pairs.extend(zip(np.cumsum(low).tolist(), target))
+
+    def transformed_metrics(pairs):
+        if not pairs:
+            return {
+                "pairs": 0,
+                "offset": 0,
+                "maeAfterOffset": 0.0,
+                "correlation": 0.0,
+            }
+        predicted = np.asarray([pair[0] for pair in pairs], dtype=float)
+        target = np.asarray([pair[1] for pair in pairs], dtype=float)
+        offset = float(np.median(target - predicted))
+        corr = (
+            float(np.corrcoef(predicted, target)[0, 1])
+            if predicted.std() and target.std()
+            else 0.0
+        )
+        return {
+            "pairs": len(pairs),
+            "offset": offset,
+            "maeAfterOffset": float(
+                np.mean(np.abs(predicted + offset - target))
+            ),
+            "correlation": corr,
+        }
+
+    direct_dt_metrics = transformed_metrics(direct_pairs)
+    cumulative_dt_metrics = transformed_metrics(cumulative_pairs)
+
+    decoded_flat = b"".join(row["tokens"] for row in decoded_rows)
+    decoded_token_metrics = token_metrics(decoded_flat)
+    primary_by_line = event_multisets(primary_events, len(decoded_rows))
+    ptu_by_line = [
+        Counter((event["x"], event["dt"]) for event in line["events"])
+        for line in macro_lines[: len(decoded_rows)]
+    ]
+    exact_event_rows = sum(
+        left == right for left, right in zip(primary_by_line, ptu_by_line)
+    )
+    differing_events = sum(
+        sum((left - right).values()) + sum((right - left).values())
+        for left, right in zip(primary_by_line, ptu_by_line)
+    )
+    primary_class_counts = Counter(
+        f"0x{event['class']:02x}" for event in primary_events
+    )
+    reference_class_counts = Counter(
+        f"0x{event['class']:02x}" for event in reference_events
+    )
+
+    primary_array = np.asarray(
+        [
+            (event["line"], event["x"], event["dt"], event["class"])
+            for event in primary_events
+        ],
+        dtype=np.int32,
+    )
+    reference_array = np.asarray(
+        [
+            (event["line"], event["x"], event["dt"], event["class"])
+            for event in reference_events
+        ],
+        dtype=np.int32,
+    )
+    np.savez_compressed(
+        args.out / "decoded_lif_events.npz",
+        primary=primary_array,
+        reference=reference_array,
+        dimensions=np.asarray([len(decoded_rows), 512, 4096], dtype=np.int32),
+    )
+    generated_ptu = args.out / "decoded_lif_primary_events.ptu"
+    generated_records = write_ptu_from_events(
+        args.ptu, generated_ptu, primary_events, len(decoded_rows)
+    )
+    generated_lines = common.decode_ptu_lines(generated_ptu)
+    generated_exact = len(generated_lines) == len(ptu_by_line) and all(
+        Counter(line) == ptu_by_line[i]
+        for i, line in enumerate(generated_lines)
+    )
+    frames = len(decoded_rows) // 512
+    primary_image = np.zeros((frames, 512, 512), dtype=np.uint16)
+    reference_image = np.zeros_like(primary_image)
+    ptu_image = np.zeros_like(primary_image)
+    for event in primary_events:
+        primary_image[
+            event["line"] // 512, event["line"] % 512, event["x"]
+        ] += 1
+    for event in reference_events:
+        reference_image[
+            event["line"] // 512, event["line"] % 512, event["x"]
+        ] += 1
+    for line, item in enumerate(macro_lines[: len(decoded_rows)]):
+        for event in item["events"]:
+            ptu_image[line // 512, line % 512, event["x"]] += 1
+    image_difference = primary_image.astype(np.int32) - ptu_image.astype(
+        np.int32
+    )
+    aggregate_primary = primary_image.sum(axis=0)
+    aggregate_reference = reference_image.sum(axis=0)
+    common.save_pgm(
+        args.out / "decoded_lif_primary_intensity.pgm", aggregate_primary
+    )
+    common.save_pgm(
+        args.out / "decoded_lif_reference_intensity.pgm", aggregate_reference
+    )
+    common.save_pgm(
+        args.out / "decoded_lif_ptu_difference.pgm",
+        np.abs(image_difference).sum(axis=0),
+    )
+
+    summary = {
+        "status": "patent-guided Deflate and reduced-time-tag attack",
+        "container": {
+            "streamBytes": len(stream),
+            "descriptorBits": descriptor_bits,
+            "descriptorBytesFractional": descriptor_bits / 8,
+            "excessBytes": len(stream) - descriptor_bits / 8,
+            "completeGroups": len(group_lengths),
+            "meanExcessBytesPerGroup": (len(stream) - descriptor_bits / 8)
+            / len(group_lengths),
+        },
+        "descriptorDecoder": {
+            "descriptors": len(lengths),
+            "groupsExpected": len(lengths) // 66,
+            "groupsDecoded": len(decoded_groups),
+            "rowsDecoded": len(decoded_rows),
+            "errors": decode_errors,
+            "consumedBits": consumed_bits,
+            "streamBits": len(stream) * 8,
+            "paddingBits": len(stream) * 8 - consumed_bits,
+            "wrapperCounts": dict(
+                Counter(group["wrapper"] for group in decoded_groups)
+            ),
+            "decodedTokenBytes": len(decoded_flat),
+            "tokenMetrics": decoded_token_metrics,
+        },
+        "zlibHeaders": len(headers),
+        "headerOffsets": headers,
+        "leadingStream": {
+            key: value for key, value in leading.items() if key != "output"
+        },
+        "leadingTokens": leading_metrics,
+        "completeIndependentStreams": len(accepted_streams),
+        "recoveredBytes": len(recovered),
+        "recoveredTokens": decoded_metrics,
+        "deflateSymbols": {
+            "parsedBlocks": len(literal_blocks),
+            "literalBytes": total_literals,
+            "matchBytes": total_match_bytes,
+            "matchFraction": total_match_bytes
+            / max(1, total_literals + total_match_bytes),
+        },
+        "ptu": {
+            "lines": len(macro_lines),
+            "events": len(ptu_events),
+            "dtMin": min(ptu_dt),
+            "dtMax": max(ptu_dt),
+            "dtUnique": len(ptu_dt),
+        },
+        "patentDeltaComparison": {
+            "low7VsSortedPtuDeltaCorrelation": delta_corr
+        },
+        "ptuRowValidation": {
+            "rows": row_count,
+            "lowTokenCountCorrelation": count_corr,
+            "lowTokenCountExactAllRows": count_exact,
+            "lowTokenCountExactEventRows": event_exact,
+            "directLow7VsMicrotime": direct_dt_metrics,
+            "cumulativeLow7VsMicrotime": cumulative_dt_metrics,
+            "commonTokenSequencesByPtuCount": sequence_by_count,
+        },
+        "eventDecoder": {
+            "primaryClasses": ["0xa0", "0xa8", "0xb0"],
+            "referenceClasses": ["0xb8"],
+            "primaryClassCounts": dict(primary_class_counts),
+            "referenceClassCounts": dict(reference_class_counts),
+            "primaryEvents": len(primary_events),
+            "referenceEvents": len(reference_events),
+            "ptuEvents": len(ptu_events),
+            "exactRows": exact_event_rows,
+            "rowAgreement": exact_event_rows / len(decoded_rows),
+            "symmetricEventDifference": differing_events,
+            "generatedPtuRecords": generated_records,
+            "generatedPtuExactXDt": generated_exact,
+            "imageShape": list(primary_image.shape),
+            "imageMaxAbsoluteDifference": int(
+                np.max(np.abs(image_difference))
+            ),
+            "imageMeanAbsoluteDifference": float(
+                np.mean(np.abs(image_difference))
+            ),
+            "imageCorrelation": float(
+                np.corrcoef(primary_image.ravel(), ptu_image.ravel())[0, 1]
+            ),
+        },
+        "literalBlockScan": {
+            "candidates": len(scanned_blocks),
+            "totalOutputBytes": sum(
+                item["outputBytes"] for item in scanned_blocks
+            ),
+            "firstCandidates": [
+                {key: value for key, value in item.items() if key != "output"}
+                for item in scanned_blocks[:50]
+            ],
+        },
+        "acceptedStreams": [
+            {key: value for key, value in item.items() if key != "output"}
+            for item in accepted_streams
+        ],
+        "topCandidates": [
+            {key: value for key, value in item.items() if key != "output"}
+            for item in candidates[:30]
+        ],
+    }
+    summary["inference"] = {
+        "zlibWrapperConfirmed": stream[:2]
+        in (b"\x78\x01", b"\x78\x5e", b"\x78\x9c", b"\x78\xda"),
+        "patentLikeTokensRecovered": bool(
+            leading["output"] and leading_metrics["highBitFraction"] > 0.5
+        ),
+        "huffmanOnlySupported": bool(
+            decoded_groups
+            and all(group["distanceAlphabet"] == 0 for group in decoded_groups)
+        ),
+        "allGroupsDecoded": len(decoded_groups) == len(lengths) // 66
+        and not decode_errors,
+        "rowBoundariesRecovered": len(decoded_rows) == int(header[5]),
+        "photonTokensIdentified": bool(differing_events == 0),
+        "completeDecoder": bool(
+            not decode_errors
+            and len(decoded_rows) == int(header[5])
+            and differing_events == 0
+            and generated_exact
+        ),
+    }
+    (args.out / "patent_guided_deflate_attack.json").write_text(
+        json.dumps(summary, indent=2), encoding="utf-8"
+    )
+    (args.out / "patent_guided_deflate_leading_tokens.bin").write_bytes(
+        leading["output"]
+    )
+    (args.out / "patent_guided_deflate_recovered_tokens.bin").write_bytes(
+        bytes(recovered)
+    )
+    (args.out / "patent_guided_deflate_all_tokens.bin").write_bytes(
+        decoded_flat
+    )
+
+    with (args.out / "patent_guided_deflate_blocks.csv").open(
+        "w", newline="", encoding="utf-8"
+    ) as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            [
+                "start_bit",
+                "end_bit",
+                "compressed_bits",
+                "output_bytes",
+                "high_bit_fraction",
+                "unique_bytes",
+                "final",
+            ]
+        )
+        for item in scanned_blocks:
+            writer.writerow(
+                [
+                    item["startBit"],
+                    item["endBit"],
+                    item["compressedBits"],
+                    item["outputBytes"],
+                    item["highBitFraction"],
+                    item["uniqueBytes"],
+                    item["final"],
+                ]
+            )
+
+    with (args.out / "patent_guided_deflate_rows.csv").open(
+        "w", newline="", encoding="utf-8"
+    ) as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            [
+                "line",
+                "group",
+                "row_in_group",
+                "compressed_bits",
+                "token_bytes",
+                "low_tokens",
+                "ptu_photons",
+                "eob",
+                "tokens_hex",
+            ]
+        )
+        for i, row in enumerate(decoded_rows):
+            writer.writerow(
+                [
+                    row["line"],
+                    row["group"],
+                    row["rel"],
+                    row["compressedBits"],
+                    len(row["tokens"]),
+                    sum(value < 0x80 for value in row["tokens"]),
+                    len(macro_lines[i]["events"])
+                    if i < len(macro_lines)
+                    else "",
+                    row["eob"],
+                    row["tokens"].hex(),
+                ]
+            )
+
+    for name, events in (
+        ("decoded_lif_primary_events.csv", primary_events),
+        ("decoded_lif_reference_events.csv", reference_events),
+    ):
+        with (args.out / name).open(
+            "w", newline="", encoding="utf-8"
+        ) as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["line", "x", "microtime", "class"])
+            for event in events:
+                writer.writerow(
+                    [
+                        event["line"],
+                        event["x"],
+                        event["dt"],
+                        f"0x{event['class']:02x}",
+                    ]
+                )
+
+    with (args.out / "patent_guided_deflate_streams.csv").open(
+        "w", newline="", encoding="utf-8"
+    ) as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            [
+                "offset",
+                "cmf",
+                "flg",
+                "blocks",
+                "output_bytes",
+                "final",
+                "end_bit",
+                "error",
+            ]
+        )
+        for item in candidates:
+            writer.writerow(
+                [
+                    item["offset"],
+                    item["cmf"],
+                    item["flg"],
+                    item["blockCount"],
+                    item["outputBytes"],
+                    item["final"],
+                    item["endBit"],
+                    item["error"]["message"] if item["error"] else "",
+                ]
+            )
+
+    lead_error = leading["error"]["message"] if leading["error"] else "none"
+    report = f"""# Patent-guided Deflate attack
+
+The Leica compressed stream was reparsed according to US20230344447: grouped reduced time-tag records, sorted arrival-time differences, 7-bit photon values with upper-bit escapes, class/pixel/line markers, and Deflate entropy coding.
+
+## Strong positive findings
+
+- stream prefix: `{stream[:8].hex()}`
+- valid zlib wrapper at byte zero: {summary["inference"]["zlibWrapperConfirmed"]}
+- leading Deflate blocks parsed: {leading["blockCount"]}
+- leading decompressed token bytes: {leading["outputBytes"]}
+- leading token high-bit fraction: {leading_metrics["highBitFraction"]:.5f}
+- leading parser stop: bit {leading["endBit"]}, `{lead_error}`
+- descriptor total: {descriptor_bits} bits ({descriptor_bits / 8:.3f} bytes)
+- descriptor records: {len(lengths)} = {len(lengths) // 66} x 66
+- groups decoded exactly: {len(decoded_groups)}
+- rows decoded exactly: {len(decoded_rows)}
+- descriptor padding after final group: {len(stream) * 8 - consumed_bits} bit
+- decoded literal token bytes: {len(decoded_flat)}
+- wrapper values: {dict(Counter(group["wrapper"] for group in decoded_groups))}
+
+## Full-stream framing scan
+
+- valid-looking zlib headers: {len(headers)}
+- independently complete streams recovered: {len(accepted_streams)}
+- recovered token bytes: {len(recovered)}
+- parsed literal bytes across candidates: {total_literals}
+- parsed LZ match bytes: {total_match_bytes}
+- independently located literal-only dynamic blocks: {len(scanned_blocks)}
+- token bytes from located blocks: {sum(item["outputBytes"] for item in scanned_blocks)}
+- low-7 token versus sorted PTU-delta correlation: {delta_corr:.5f}
+- low-token count versus PTU photon-count correlation: {count_corr:.5f}
+- exact low-token/PTU count on event rows: {event_exact:.5f}
+- cumulative low-7 versus PTU microtime correlation: {cumulative_dt_metrics["correlation"]:.5f}
+- cumulative microtime MAE after offset: {cumulative_dt_metrics["maeAfterOffset"]:.5f}
+
+## Exact event reconstruction
+
+- primary classes: `0xa0`, `0xa8`, `0xb0`
+- separate/reference class: `0xb8`
+- decoded primary events: {len(primary_events)}
+- PTU events: {len(ptu_events)}
+- exact `(x, microtime)` row multisets: {exact_event_rows}/{len(decoded_rows)}
+- symmetric event difference: {differing_events}
+- separately decoded `0xb8` events: {len(reference_events)}
+- generated PTU records: {generated_records}
+- generated PTU exact x/microtime agreement: {generated_exact}
+- reconstructed image shape: {list(primary_image.shape)}
+- image max/mean absolute difference: {np.max(np.abs(image_difference))}/{np.mean(np.abs(image_difference)):.6f}
+- image correlation: {np.corrcoef(primary_image.ravel(), ptu_image.ravel())[0, 1]:.9f}
+
+## Decision
+
+"""
+    if summary["inference"]["completeDecoder"]:
+        report += "The group framing, shared dynamic-Huffman tables, row boundaries, photon tokens, and microtime transform are sufficient for a provisional decoder.\n"
+    elif summary["inference"]["allGroupsDecoded"]:
+        report += "The complete Huffman container and every row boundary are decoded. Token-marker semantics still require mapping before exact PTU event reconstruction.\n"
+    else:
+        report += "The zlib wrapper and patent-like reduced-time-tag bytes are confirmed, but group framing is not yet fully recovered. The next step is to infer the short frame inserted where the standard inflater encounters the stored-block-length error, then restart Deflate at each 64-line group.\n"
+    report += "\nKnown: all group and row boundaries, dynamic Huffman tables, pixel runs, primary/reference classes, large-time escapes, sorted arrival-time deltas, and exact PTU event agreement. The physical meaning of the separate 0xb8 class remains unresolved. Earlier row-bit oracle attacks are superseded because they skipped the first two descriptors and treated compressed code lengths as standalone event payload bits.\n"
+    (args.out / "patent_guided_deflate_attack.md").write_text(
+        report, encoding="utf-8"
+    )
+    common.refresh_zip(Path.cwd())
+    print(
+        json.dumps(
+            {
+                "leading": summary["leadingStream"],
+                "leadingTokens": leading_metrics,
+                "streams": len(accepted_streams),
+                "recoveredBytes": len(recovered),
+                "inference": summary["inference"],
+            },
+            indent=2,
+        )
+    )
+
+
+if __name__ == "__main__":
+    main()

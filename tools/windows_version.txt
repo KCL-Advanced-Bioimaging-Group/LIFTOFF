@@ -1,0 +1,26 @@
+# UTF-8 Windows executable properties for the 3.2.2 release.
+VSVersionInfo(
+    ffi=FixedFileInfo(
+        filevers=(3, 2, 2, 0),
+        prodvers=(3, 2, 2, 0),
+        mask=0x3F,
+        flags=0x0,
+        OS=0x40004,
+        fileType=0x1,
+        subtype=0x0,
+        date=(0, 0),
+    ),
+    kids=[
+        StringFileInfo([
+            StringTable('040904B0', [
+                StringStruct('FileDescription', 'LIFTOFF'),
+                StringStruct('FileVersion', '3.2.2'),
+                StringStruct('InternalName', 'LIFTOFF_App_3.2.2'),
+                StringStruct('OriginalFilename', 'LIFTOFF_App_3.2.2.exe'),
+                StringStruct('ProductName', 'LIFTOFF'),
+                StringStruct('ProductVersion', '3.2.2'),
+            ]),
+        ]),
+        VarFileInfo([VarStruct('Translation', [1033, 1200])]),
+    ],
+)

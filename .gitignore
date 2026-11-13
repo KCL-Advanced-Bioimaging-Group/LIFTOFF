@@ -1,0 +1,23 @@
+.venv/
+.bootstrap/
+.python/
+.cache/
+__pycache__/
+*.py[cod]
+build/
+dist/
+logs/
+.pytest_cache/
+.ruff_cache/
+validation_artifacts/
+*.egg-info/
+
+# Machine-local editor settings and validation output
+/.codex/
+/.agents/*
+!/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/leica-release-audit/
+/validation/
+/NVIDIA Corporation/
+/.codex-ssh/

@@ -1,0 +1,17 @@
+{
+  "sourceCommit": "c92db8290917e83725bb55e735c586e907830f9e",
+  "sourceModified": true,
+  "baselineCommit": "3fcb5037e7f728f2cd31087637b9a5e90b293823",
+  "referenceVersion": "2.4.0",
+  "referenceExecutableSha256": "9127d8c772c01f7f72c8905d4814f9f466f32faa11780d8b46c199ec1e1d0cab",
+  "nativeDecoderVersion": "3.3.1",
+  "nativeDecoderApi": 6,
+  "nativeFilterVersion": "1.2.0",
+  "nativeFilterApi": 2,
+  "targetSystem": "Windows",
+  "targetArchitecture": "AMD64",
+  "nativeLibraries": {
+    "LeicaFlimDecoder.dll": "64e7e2d9e4e23bc48f473e707452f51cc087febfa60cff8206fcb7a19b10f326",
+    "LeicaLmsrawFilter.dll": "67dfa585df2b5968f529466aa3eeadd870130d9325990b5d372734e9cadbfc70"
+  }
+}
