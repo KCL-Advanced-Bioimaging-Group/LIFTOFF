@@ -25,6 +25,5 @@ authors:
 title: "LIFTOFF: Leica Imaging Files Translated in Open File Formats"
 version: "1.0.0"
 date-released: 2026-11-13
-url: "https://github.com/KCL-Advanced-Bioimaging-Group/LIFTOFF"
 license: GPL-3.0-only
 repository-code: "https://github.com/KCL-Advanced-Bioimaging-Group/LIFTOFF"
