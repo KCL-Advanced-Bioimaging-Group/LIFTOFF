@@ -20,8 +20,14 @@ from leica_flim_converter.reflection_export import (
     ReflectionWindow,
     filter_native_cube,
 )
-from leica_flim_converter.timing import time_grid
+from leica_flim_converter.timing import native_source_grid, time_grid
 from tests.compressed_fixture import mixed_compressed_lif
+
+
+@pytest.fixture(name="raw_dataset")
+def numeric_export_dataset(raw_dataset):
+    """Use a 128-bin native period for numeric export checks."""
+    return replace(raw_dataset, laser_frequency_hz=78_125_000.0)
 
 
 def _export_pair(dataset, directory, bins, mask, windows=()):
@@ -66,6 +72,7 @@ def test_reflection_exclusion_in_written_files(
         if grammar == "raw"
         else scan_lif(mixed_compressed_lif(tmp_path / "compressed.lif"))[0]
     )
+    dataset = replace(dataset, laser_frequency_hz=78_125_000.0)
     mask = (256, 512, 1024)[mode] if grammar == "raw" else (7, 3, 1)[mode]
     lower, upper = (9.5, 12.5) if grammar == "raw" else (2, 4)
     window = ReflectionWindow(dataset.key, lower, upper)
@@ -134,6 +141,7 @@ def test_all_reflection_photons_preserve_empty_scan(
 ) -> None:
     """Retain complete scan markers even when no photons remain."""
     dataset = scan_lif(mixed_compressed_lif(tmp_path / "empty.lif"))[0]
+    dataset = replace(dataset, laser_frequency_hz=78_125_000.0)
     grid = time_grid(dataset, None)
     original, _, _, _ = _export_pair(dataset, tmp_path / "original", None, 7)
     photons, image, ptu_metadata, metadata = _export_pair(
@@ -163,7 +171,7 @@ def test_filter_native_cache_and_cancellation(
     raw_dataset: DatasetInfo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Reuse a native cache and support cancellation."""
-    grid = time_grid(raw_dataset, None)
+    grid = native_source_grid(raw_dataset, time_grid(raw_dataset, 32))
     cube = decode_histogram_plane(
         raw_dataset, 0, bins=grid.bins, grid=grid, event_flag_mask=256
     )

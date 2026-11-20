@@ -18,12 +18,13 @@ from .acquisition_metadata import acquisition_metadata, ics_history
 from .dataset import DatasetInfo
 from .decay import ALL
 from .header_metadata import ics_standard_header
+from .ics_encoding import sample_encoding
 from .optical_metadata import wavelength_label
 from .spatial_metadata import spatial_calibration
-from .timing import TimeGrid, time_grid
+from .timing import ICS_BIN_CHOICES, TimeGrid, time_grid
 from .version import APPLICATION_NAME
 
-ALLOWED_BINS = (32, 64, 128, 256, 512, 1024, 2048, 4096)
+ALLOWED_BINS = ICS_BIN_CHOICES
 CancelCheck = Callable[[], bool]
 Progress = Callable[[int, int], None]
 
@@ -149,7 +150,7 @@ def write_ics(
     path: str | Path,
     stack: np.ndarray,
     dataset: DatasetInfo,
-    compression: str = "gzip",
+    compression: str = "uncompressed",
     *,
     cancelled: CancelCheck | None = None,
     progress: Progress | None = None,
@@ -167,14 +168,7 @@ def write_ics(
         raise ValueError(
             "ICS cube X/Y dimensions do not match the selected Leica dataset"
         )
-    maximum = int(stack.max())
-    if maximum > np.iinfo(np.uint32).max or int(stack.min()) < 0:
-        raise OverflowError(
-            "ICS histogram counts must fit an unsigned 32-bit integer"
-        )
-    bits = 16 if maximum <= np.iinfo(np.uint16).max else 32
-    dtype = np.dtype("<u2" if bits == 16 else "<u4")
-    byte_order = "\t".join(str(index) for index in range(1, bits // 8 + 1))
+    bits, dtype, maximum, encoding = sample_encoding(stack)
     axes = spatial_calibration(dataset)["axes"]
     pixel_x, pixel_y = axes["x"]["scale"], axes["y"]["scale"]
     grid = grid or time_grid(dataset, bins)
@@ -186,6 +180,7 @@ def write_ics(
         else acquisition_metadata(dataset, dimension_mode="unspecified")
     )
     metadata["histogramTiming"] = grid.metadata()
+    metadata["sampleEncoding"] = encoding
     header = (
         "\t\nics_version\t2.0\nfilename\t"
         f"{target.stem}"
@@ -200,11 +195,14 @@ def write_ics(
         f"{bins}"
         "\nlayout\tcoordinates\tvideo\nlayout\tsignificant_bits\t"
         f"{bits}"
-        "\nrepresentation\tformat\tinteger\nrepresentation\tsign\tunsigned\n"
+        "\nrepresentation\tformat\t"
+        f"{'real' if dtype.kind == 'f' else 'integer'}"
+        "\nrepresentation\tsign\t"
+        f"{'signed' if dtype.kind == 'f' else 'unsigned'}\n"
         "representation\tcompression\t"
         f"{compression}"
         "\nrepresentation\tbyte_order\t"
-        f"{byte_order}"
+        f"{'\t'.join(map(str, range(1, bits // 8 + 1)))}"
         "\nparameter\torigin\t0.000000\t0.000000\t0.000000\t0.000000\n"
         "parameter\tscale\t1.000000\t"
         f"{pixel_y:.17g}"
@@ -275,6 +273,9 @@ def write_ics(
         "path": str(target),
         "bins": bins,
         "bits": bits,
+        "sampleFormat": "real" if dtype.kind == "f" else "integer",
+        "sampleEncoding": encoding,
+        "missingSamples": encoding["missingSamples"],
         "compression": compression,
         "shapeZYX": [bins, height, width],
         "shapeXYH": [width, height, bins],

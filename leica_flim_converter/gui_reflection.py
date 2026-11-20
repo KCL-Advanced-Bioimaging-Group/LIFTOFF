@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -9,16 +10,49 @@ from PySide6.QtCore import QEvent, QLineF, QObject, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import QLabel, QPushButton
 
-from .gui_helpers import _histogram_values_2
+from .gui_helpers import _draw_histogram_curves, _histogram_values_2
 from .gui_models import connect_signal
 from .gui_mosaic_graphs import combined_mosaic_graphs
 from .gui_reflection_manual import ManualReflectionPlacement
 from .reflection import detect_reflection_peak
+from .reflection_metadata import REPAIR_MODES
 
 if TYPE_CHECKING:
     from .gui_plot import HistogramPlot
 
 GraphKey = tuple[str, int | None, int]
+
+
+def _draw_simulated_counts(
+    painter, series, rectangle, maximum, logarithmic, log_bounds, bounds
+):
+    """Draw one unconnected dot per simulated native-bin count."""
+    lower, upper = log_bounds or (0, 1)
+    painter.save()
+    painter.setClipRect(rectangle)
+    painter.setPen(Qt.PenStyle.NoPen)
+    for _label, values, color in series:
+        values = np.asarray(values).reshape(-1)
+        painter.setBrush(QColor(color))
+        for index in range(
+            max(0, math.ceil(bounds[0])),
+            min(values.size, math.floor(bounds[1]) + 1),
+        ):
+            count = float(values[index])
+            if not math.isfinite(count) or (logarithmic and count <= 0):
+                continue
+            x = (
+                rectangle.left()
+                + index / max(1, values.size - 1) * rectangle.width()
+            )
+            fraction = (
+                (math.log10(count) - lower) / (upper - lower)
+                if logarithmic
+                else count / maximum
+            )
+            y = rectangle.bottom() - fraction * rectangle.height()
+            painter.drawEllipse(QPointF(x, y), 1.6, 1.6)
+    painter.restore()
 
 
 class ReflectionMarkers(QObject):
@@ -32,6 +66,7 @@ class ReflectionMarkers(QObject):
         self.plot = plot
         self.regions: dict[GraphKey, tuple[float, float]] = {}
         self._filtered_keys: set[GraphKey] = set()
+        self.processing_modes: dict[GraphKey, str] = {}
         self._areas: list[tuple[GraphKey, QRectF]] = []
         self._drag: tuple[GraphKey, int, QRectF] | None = None
         self._context: tuple | None = None
@@ -64,6 +99,7 @@ class ReflectionMarkers(QObject):
         self.manual.cancel()
         self.regions.clear()
         self._filtered_keys.clear()
+        self.processing_modes.clear()
         self._areas.clear()
         self._drag = None
         self.plot.unsetCursor()
@@ -203,15 +239,72 @@ class ReflectionMarkers(QObject):
     def display_series(self, series: list, key: GraphKey) -> list:
         """Exclude filtered bins from scales without changing data."""
         bounds = self.omitted(key)
-        if bounds is None:
+        if bounds is None or self.processing_modes.get(key) in REPAIR_MODES:
             return series
         result = []
         for label, values, color in series:
-            displayed = np.asarray(values).copy()
+            displayed = np.array(values, dtype=np.float64, copy=True)
             bins = np.arange(displayed.size)
-            displayed[(bins >= bounds[0]) & (bins <= bounds[1])] = 0
+            displayed[(bins >= bounds[0]) & (bins <= bounds[1])] = np.nan
             result.append((label, displayed, color))
         return result
+
+    def draw_repair(
+        self, painter, key, rectangle, series, maximum, log_bounds
+    ):
+        """Draw smooth repairs as dashes and simulated bins as dots."""
+        bounds = self.omitted(key)
+        if (
+            bounds is None
+            or self.processing_modes.get(key) not in REPAIR_MODES
+        ):
+            return
+        if self.processing_modes.get(key) == "simulate":
+            _draw_simulated_counts(
+                painter,
+                series,
+                rectangle,
+                maximum,
+                self.plot.logarithmic_scale,
+                log_bounds,
+                bounds,
+            )
+            return
+        repaired_series = [
+            (
+                label,
+                np.where(
+                    (np.arange(len(values)) >= bounds[0])
+                    & (np.arange(len(values)) <= bounds[1]),
+                    values,
+                    np.nan,
+                ),
+                color,
+            )
+            for label, values, color in series
+        ]
+        painter.save()
+        x0 = (
+            rectangle.left()
+            + bounds[0] / max(1, key[2] - 1) * rectangle.width()
+        )
+        x1 = (
+            rectangle.left()
+            + bounds[1] / max(1, key[2] - 1) * rectangle.width()
+        )
+        painter.setClipRect(
+            QRectF(x0, rectangle.top(), x1 - x0, rectangle.height())
+        )
+        _draw_histogram_curves(
+            painter,
+            repaired_series,
+            rectangle,
+            maximum,
+            self.plot.logarithmic_scale,
+            log_bounds=log_bounds,
+            line_style=Qt.PenStyle.DashLine,
+        )
+        painter.restore()
 
     def draw(
         self, painter: QPainter, key: GraphKey, rectangle: QRectF

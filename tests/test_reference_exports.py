@@ -79,7 +79,7 @@ def test_complete_exports(tmp_path: Path, expected: dict) -> None:
     assert actual.photons == companion.photons
     assert np.array_equal(actual.microtime, companion.microtime)
     target.unlink()
-    for bins in (128, 256):
+    for bins in (16, 32, 64, 128):
         results = export_ics_blocks(
             [dataset],
             tmp_path,
@@ -89,8 +89,8 @@ def test_complete_exports(tmp_path: Path, expected: dict) -> None:
         assert results[0]["status"] == "exported", results
         path = Path(results[0]["path"])
         image = read_ics(path)
-        golden = expected[f"ics{bins}"]
-        assert list(image.counts.shape) == golden["shape"]
+        golden = expected["ics128"]
+        assert list(image.counts.shape) == [bins, *golden["shape"][1:]]
         assert dataset.clock_period_s is not None
         rebinned, excluded = rehistogram_arrivals(
             actual, image, dataset.clock_period_s

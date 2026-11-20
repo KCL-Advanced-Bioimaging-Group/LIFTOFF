@@ -20,7 +20,7 @@ class IcsImage:
     array.
     """
 
-    counts: NDArray[np.uint16 | np.uint32]
+    counts: NDArray[np.uint16 | np.uint32 | np.float32 | np.float64]
     header: dict[str, list[str]]
 
 
@@ -46,14 +46,16 @@ def read_ics(path: Path) -> IcsImage:
     ):
         raise ValueError("Unsupported ICS axis order")
     bits, *sizes = map(int, header["layout/sizes"])
-    if bits not in (16, 32):
-        raise ValueError("Unsupported ICS integer size")
+    real = header.get("representation/format") == ["real"]
+    if bits not in ((32, 64) if real else (16, 32)):
+        raise ValueError("Unsupported ICS sample size")
+    dtype = f"<f{bits // 8}" if real else f"<u{bits // 8}"
     if header["representation/compression"] == ["gzip"]:
         payload = gzip.decompress(payload)
     expected = int(np.prod(sizes)) * (bits // 8)
     if len(payload) != expected:
         raise ValueError("ICS payload length does not match its header")
-    counts = np.frombuffer(payload, dtype="<u2" if bits == 16 else "<u4")
+    counts = np.frombuffer(payload, dtype=dtype)
     storage_axes = list(reversed(order[1:]))
     counts = (
         counts.reshape(tuple(reversed(sizes)))

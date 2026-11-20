@@ -26,6 +26,7 @@ from .gui_models import connect_signal
 from .gui_mosaic_graphs import combined_mosaic_graphs, separated_mosaic_graphs
 from .gui_plot_controls import position_histogram_controls
 from .gui_reflection import ReflectionMarkers
+from .reflection_processing import count_array
 
 
 class HistogramPlot(QWidget):
@@ -49,9 +50,7 @@ class HistogramPlot(QWidget):
     def _histogram_plot_set_histogram_3(
         self, values=None, title="Pixel arrival histogram", summary=""
     ) -> None:
-        self.values = np.asarray(
-            values if values is not None else [], dtype=np.uint64
-        )
+        self.values = count_array(values if values is not None else [])
         self.title, self.summary, self.message = (title, summary, "")
         self.update()
 
@@ -104,7 +103,11 @@ class HistogramPlot(QWidget):
         active = getattr(
             getattr(owner, "image", None), "activated_rois", set()
         )
-        return "Activated ROIs" if active else "All Pixels"
+        if active:
+            return "Activated ROIs"
+        if len(self.series) == 1 and self.series[0][0].startswith("Pixel "):
+            return self.series[0][0]
+        return "All Pixels"
 
     def _paint_single_channel_histogram_2(self, _event):
         series = list(getattr(self, "series", ()) or ())
@@ -148,7 +151,7 @@ class HistogramPlot(QWidget):
             1,
             max(
                 (
-                    int(np.asarray(entry[1]).max())
+                    int(np.ceil(np.nanmax(np.asarray(entry[1]), initial=0)))
                     for entry in series
                     if np.asarray(entry[1]).size
                 ),
@@ -183,6 +186,14 @@ class HistogramPlot(QWidget):
             painter,
             self.reflection.graph_key(None, representative.size),
             QRectF(left, top, right - left, bottom - top),
+        )
+        self.reflection.draw_repair(
+            painter,
+            key,
+            QRectF(left, top, right - left, bottom - top),
+            series,
+            maximum,
+            log_bounds,
         )
         self._last_histogram_layout = {
             "header": "Pixel Photon-Arrival Histograms",
@@ -247,7 +258,9 @@ class HistogramPlot(QWidget):
                 1,
                 max(
                     (
-                        int(np.asarray(entry[1]).max())
+                        int(
+                            np.ceil(np.nanmax(np.asarray(entry[1]), initial=0))
+                        )
                         for entry in series
                         if np.asarray(entry[1]).size
                     ),
@@ -296,6 +309,14 @@ class HistogramPlot(QWidget):
                 self.reflection.graph_key(panel, values.size, index),
                 QRectF(left, top, right - left, bottom - top),
             )
+            self.reflection.draw_repair(
+                painter,
+                key,
+                QRectF(left, top, right - left, bottom - top),
+                series,
+                maximum,
+                log_bounds,
+            )
             layout_panels.append(
                 {
                     "title": title,
@@ -306,7 +327,9 @@ class HistogramPlot(QWidget):
                     "axisCenter": (left + right) / 2.0,
                     "titleCenter": (left + right) / 2.0,
                     "xLabelCenter": (left + right) / 2.0,
-                    "photons": int(panel.get("photons", int(values.sum()))),
+                    "photons": int(
+                        panel.get("photons", int(np.nansum(values)))
+                    ),
                     "seriesLabels": [str(entry[0]) for entry in series],
                 }
             )
@@ -406,9 +429,7 @@ class HistogramPlot(QWidget):
         if not preserve_reflection:
             self.reflection.clear()
         self._histogram_plot_set_histogram_3(values, title, summary)
-        array = np.asarray(
-            values if values is not None else [], dtype=np.uint64
-        )
+        array = count_array(values if values is not None else [])
         self.all_pixel_values = array
         self.series = [(title, array, QColor("#1769AA"))] if array.size else []
         self.hovered_mosaic_tile = None
@@ -434,7 +455,7 @@ class HistogramPlot(QWidget):
         """Compute set series."""
         prepared = []
         for label, values, color in series:
-            array = np.asarray(values, dtype=np.uint64)
+            array = count_array(values)
             prepared.append((str(label), array, QColor(color)))
         self.series = prepared
         self.values = (

@@ -23,6 +23,12 @@ from leica_flim_converter.spatial_metadata import dimension_calibration
 from tests.compressed_fixture import mixed_compressed_lif
 
 
+@pytest.fixture(name="raw_dataset")
+def numeric_export_dataset(raw_dataset):
+    """Use a 128-bin native period for numeric export checks."""
+    return replace(raw_dataset, laser_frequency_hz=78_125_000.0)
+
+
 def _ics_metadata(path: Path) -> dict:
     header = read_ics(path).header
     chunks = sorted(

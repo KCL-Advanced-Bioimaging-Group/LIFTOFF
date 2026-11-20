@@ -164,8 +164,15 @@ def test_channel_filter_and_new_event_selection(
     workspace.reflection_filter.checkbox.click()
     assert workspace.image.image == _compose_channel_images_2(expected)
     _assert_band(workspace, True)
-    for panel, counts in zip(panels, originals, strict=True):
-        np.testing.assert_array_equal(panel["cube"].counts, counts)
+    for index, (panel, counts) in enumerate(
+        zip(panels, originals, strict=True)
+    ):
+        expected_counts = counts.astype(np.float64)
+        if index == 0:
+            expected_counts[
+                int(np.ceil(bounds[0])) : int(np.floor(bounds[1])) + 1
+            ] = np.nan
+        np.testing.assert_array_equal(panel["cube"].counts, expected_counts)
     workspace.reflection_filter.checkbox.click()
     assert workspace.image.image == original
     workspace.reflection_filter.checkbox.click()
@@ -256,10 +263,13 @@ def test_example_reflection_filter(
     assert window.image.image == image_from_counts(expected)
     removed = total - int(expected.sum())
     assert removed > 0
-    assert (
-        f"{removed:,} photons filtered"
-        in window.reflection_filter.status.text()
-    )
+    assert "assigned to NaNs" in window.reflection_filter.status.text()
+    assert window.cube is not None
+    assert np.isnan(
+        window.cube.counts[
+            int(np.ceil(bounds[0])) : int(np.floor(bounds[1])) + 1
+        ]
+    ).all()
     target = Path("validation_artifacts/reflection-peak/filtered-example.png")
     target.parent.mkdir(parents=True, exist_ok=True)
     qtbot.wait(200)

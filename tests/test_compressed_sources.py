@@ -17,6 +17,7 @@ from leica_flim_converter.native_decoder import (
 from leica_flim_converter.photon_selection import dataset_selection_metadata
 from leica_flim_converter.ptu import parse_ptu
 from leica_flim_converter.ptu_export import PtuExportOptions, export_ptu_blocks
+from leica_flim_converter.timing import time_grid
 from tests.compressed_fixture import mixed_compressed_lif
 from tests.test_reference_science import example_path
 
@@ -82,7 +83,7 @@ def test_compressed_pair_exports(tmp_path: Path, mask: int) -> None:
     images = export_ics_blocks(
         datasets,
         tmp_path / "images",
-        options=IcsExportOptions(bins=32, event_flag_mask=mask),
+        options=IcsExportOptions(bins=None, event_flag_mask=mask),
     )
     for dataset, ptu_result, image_result in zip(
         datasets, ptus, images, strict=True
@@ -110,7 +111,14 @@ def test_compressed_pair_exports(tmp_path: Path, mask: int) -> None:
         assert dataset.laser_frequency_hz is not None
         assert resolution == pytest.approx(1 / dataset.laser_frequency_hz)
         image = read_ics(Path(image_result["path"]))
-        np.testing.assert_array_equal(image.counts, cube.counts)
+        native_grid = time_grid(dataset, None)
+        calibrated = decode_histogram_cube(
+            dataset,
+            bins=native_grid.bins,
+            grid=native_grid,
+            event_flag_mask=mask,
+        )
+        np.testing.assert_array_equal(image.counts, calibrated.counts)
         sidecar = json.loads(
             Path(ptu_result["sidecar"]).read_text(encoding="utf-8")
         )

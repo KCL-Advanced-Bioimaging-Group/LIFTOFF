@@ -8,7 +8,7 @@ from typing import NotRequired, TypedDict
 import numpy as np
 from numpy.typing import NDArray
 
-type CountArray = NDArray[np.uint16 | np.uint32]
+type CountArray = NDArray[np.uint16 | np.uint32 | np.float64]
 type ArrivalArray = NDArray[np.int32]
 type WordArray = NDArray[np.uint16]
 type JsonValue = (

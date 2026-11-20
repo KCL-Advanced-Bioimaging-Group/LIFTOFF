@@ -23,10 +23,17 @@ from leica_flim_converter.ics import IcsExportCancelled, write_ics
 from leica_flim_converter.ics_export import IcsExportOptions, export_ics_blocks
 from leica_flim_converter.native_decoder import decode_histogram_plane
 from leica_flim_converter.ptu_export import PtuExportOptions, export_ptu_blocks
+from leica_flim_converter.timing import time_grid
 from leica_flim_converter.version import (
     APPLICATION_VERSION,
     application_metadata,
 )
+
+
+@pytest.fixture(name="raw_dataset")
+def numeric_export_dataset(raw_dataset):
+    """Use a 128-bin native period for numeric export checks."""
+    return replace(raw_dataset, laser_frequency_hz=78_125_000.0)
 
 
 @pytest.mark.parametrize("level", [0, 6, 9])
@@ -85,7 +92,7 @@ def test_ics_axes_and_calibration(
     assert decoded.header["parameter/units"] == ["relative", "m", "m", "s"]
     scales = list(map(float, decoded.header["parameter/scale"]))
     assert scales[1:3] == pytest.approx([1e-6, 1e-6])
-    assert scales[3] == pytest.approx(1e-10, rel=1e-12, abs=0)
+    assert scales[3] == pytest.approx(8e-10, rel=1e-12, abs=0)
 
 
 def test_ics_cancellation_cleanup(raw_dataset: DatasetInfo, tmp_path: Path):
@@ -158,7 +165,11 @@ def test_partial_indexed_timelapse_ics(raw_dataset, tmp_path):
     for plane, result in enumerate(results):
         assert result["status"] == "exported", result
         cube = decode_histogram_plane(
-            dataset, plane, bins=32, event_flag_mask=256
+            dataset,
+            plane,
+            bins=32,
+            grid=time_grid(dataset, 32),
+            event_flag_mask=256,
         )
         image = read_ics(Path(result["path"]))
         np.testing.assert_array_equal(image.counts, cube.counts)

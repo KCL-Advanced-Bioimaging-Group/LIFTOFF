@@ -78,14 +78,43 @@ Weak or ambiguous peaks may produce **No reflection peak detected**. Treat
 the suggested interval as a visual aid and adjust it as needed. Detection
 and dragging alone do not filter counts.
 
-Check **Filter reflection**, below **Event selection** in the details
-panel, to exclude the interval from the displayed image and every graph.
-The space between the black boundaries becomes blank white. Only native time
-bins whose centres lie on or between the boundaries are excluded. Channels
-without boundaries keep all their photons. The filter applies to the current
-event selection and reports the number of excluded photons below the checkbox.
-Until boundaries have been completed, the checkbox is disabled and displays
-**No reflection peak identified.**
+Check **Filter reflection**, below **Event selection**, and choose its mode:
+
+- **Assign to NaNs** replaces affected pixel/time samples with NaN (missing),
+  leaving a white gap in the graph.
+- **Interpolate values (smooth)** draws a straight line between the two
+  whole-image log-count endpoints outside the interval. Exponentiating this
+  line gives the expected photon counts. The replacement is shown dashed.
+- **Simulate photon counts from interpolation** uses that same bridge as a
+  mean, then draws independent Poisson counts for every pixel and native time
+  bin. These are synthetic integer counts, shown as unconnected dots in the
+  marked region, with one dot for each time bin of the displayed graph.
+
+The bridge uses the sum of all pixels in the corresponding image, after Event
+selection, even when a pixel or ROI is displayed. Only native bin centres on
+or between the boundaries are replaced. The two retained endpoint counts must
+be positive; otherwise the interval remains NaN and the panel explains why.
+There is no derivative interpolation or Gaussian smoothing in either mode.
+
+Whole-image expected counts are allocated across pixels in proportion to each
+pixel's total counts outside the reflection interval. Pixels with zero
+exterior counts receive zero expected counts. This is a shared decay shape
+with spatial weights. Simulation samples each pixel's mean directly, rather
+than adding noise to an already sampled trace. All views read the same
+repaired pixel cube.
+
+A seed is retained with each saved detector/T/Z reflection setting. Repaints,
+ROI changes, toggling the filter or switching between smooth and simulated
+values do not resample the realization. The seed and data context determine
+independent streams for detectors/tiles, planes, event selections and boundary
+positions. Matching native ICS exports reproduce the preview's sampled cube;
+coarser exports sum its native samples. Exports using different plane
+integration or photon/time selections apply the model to those selected data.
+
+Both replacement modes create synthetic data, not recovered measured photons.
+Source counts remain intact and are restored when filtering is unchecked.
+Channels without boundaries retain their original counts. Until boundaries are
+defined, the toggle is disabled with **No reflection peak identified.**
 
 While filtering is enabled, the boundaries are locked and the detection and
 **Clear** buttons are disabled. Uncheck **Filter reflection** to
@@ -115,7 +144,7 @@ tiles, each channel has independent contrast levels; a mosaic channel's curve
 pools its tiles. Channel headers are excluded. Reset affects only that
 image's levels. New previews reset all levels. Switching the
 reflection preview filter preserves the selected contrast levels.
-The labels above each histogram express its contrast boundaries as percentiles;
+The **Intensity** axis label shows the contrast boundaries as percentiles.
 P0 is the actual minimum and P100 the true maximum. The boundaries are drawn
 at their corresponding intensity values on the axis. Percentile spacing is
 not used to draw the frequency curve, since it distorts histogram shapes.
@@ -131,8 +160,10 @@ and disables that row. Filenames identify detector/filter, selected plane, and
 nondefault photon selection. Existing files are suffixed or skipped according to
 the chosen collision policy.
 
-ICS exports provide independently selected 128- or 256-bin calibrated integer
-histograms, with gzip or uncompressed payloads and JSON metadata. PTU exports
+ICS exports offer power-of-two bin counts from 16 to 32768, plus Native timing.
+Choices above the calculated native window are greyed out. **GZip** is the
+default compression, and **Uncompressed** remains available.
+Exports include JSON metadata. PTU exports
 retain native photon microtimes and include raster markers and overflow records.
 Their macrotime is reconstructed from the raster acquisition; see the scientific
 contracts before interpreting it as a hardware timestamp. Partial acquisitions
@@ -176,14 +207,53 @@ Set `LIFTOFF_LOG_DIR` to override that location. The previous
 
 
 Timing exports use the selected detector and scan sequence's recorded arrival
-clock and laser frequency. The export table shows timing quality. ICS retains
-128 bins as its compatibility default; choose **Native timing** to preserve the
-recorded increment, or choose a numeric bin count to rebin one laser period.
-Finer output bins do not add timing information. Photons outside the chosen
-arrival window are excluded and counted in the JSON sidecar and completion
-message. ICS temporal calibration is written in seconds in both header fields.
-Native bin counts can be non-powers of two; confirm support in downstream tools
-before adopting that option as a routine default.
+clock. The export table shows timing quality. The full-resolution numeric
+window is the nearest power of two to `1 / (selected rate * native clock)`.
+Distance is measured in native bins; exact halfway ties use the smaller power.
+If a selected rate is absent, the actual recorded rate supplies a clearly
+labelled fallback. Full recorded clock precision is retained.
+
+For the supplied 96.9697 ps clock, selected rates of 80, 40, 20 and 10 MHz
+give full-resolution windows of 128, 256, 512 and 1024 bins respectively.
+The dropdown selects this calculated count by default and labels it, for
+example, **256 (default for 40MHz)**. Its bin width remains one native clock
+increment. The 80 and 40 MHz windows span about 12.4121 and 24.8242 ns.
+
+Smaller numeric choices first trim to the same calculated native window, then
+sum equal adjacent groups. At 40 MHz, 128-bin output sums pairs from the first
+256 native bins, giving 193.9394 ps per output bin. All numeric choices for a
+given dataset cover the same window and retain the same photons. Grouping uses
+exact integer indices and cannot introduce uneven groups or interpolation.
+Choices above the calculated native count are disabled; upsampling is rejected
+by the exporter as well. A numeric window smaller than 16 bins permits only
+Native timing. Windows above 32768 native bins are unsupported.
+
+For a batch with mixed rates, the default and enabled choices use the smallest
+native window among the checked outputs. Before outputs are checked, all
+loaded datasets supply this common limit. Changing the checked outputs updates
+the automatic default. An explicitly chosen smaller count or Native timing
+is preserved while it remains valid.
+
+**Native timing** keeps one output bin per recorded arrival increment across
+one laser period, retaining the complete final native bin. Its bin count is
+`ceil(actual laser period / clock)`: 129 bins at an actual 80 MHz, or 133 at an
+actual 78.02 MHz for the supplied clock. It keeps the complete actual-period
+window instead of the rounded power-of-two window. It does not stretch the
+arrival increment or combine bins. Confirm
+that downstream software accepts these non-power-of-two bin counts.
+
+Photons outside the chosen arrival window are discarded and counted in the
+JSON sidecar and completion message. ICS temporal calibration is written in
+seconds in both header fields. The full recorded clock precision is retained;
+the rounded values above describe the choices for users.
+
+The info panel shows **Repetition rate** below **Histogram cube**, for example
+`80 MHz (selected) / 78.02 MHz (actual)`. Selected is the matched source's
+recorded WLL pulse-picker setting; actual is the recorded detector/sequence
+laser frequency. A missing selected setting is shown as unavailable rather
+than inferred from the actual rate. Multiple displayed rates are listed on
+separate lines. The selected rate or labelled actual-rate fallback determines
+the numeric window length; the native clock determines full-resolution bin width.
 
 ICS and PTU files also contain essential acquisition metadata, including
 excitation/emission settings, detector names, T/Z identity, tile position and
@@ -256,12 +326,46 @@ use the individual T/Z bounds when both are saved. Filtering an integrated
 output requires a single interval covering the full output. Mosaic tiles share
 their channel's interval.
 
-ICS excludes the native arrival bins before rebinning, so counts on either
-side of a boundary remain correct even when they share an output bin. PTU
-omits matching photon records while preserving the scan markers and remaining
-native arrival values. JSON sidecars record the exact boundaries and number
-of excluded reflection photons separately from photons outside the ICS time
-window. Unchecked exports retain the usual photon-selection behaviour.
+Filtered ICS uses the saved **Assign to NaNs**, **Interpolate values
+(smooth)** or **Simulate photon counts from interpolation** mode for each
+output. It applies the shared model and any sampling on the native grid before
+grouping bins. Finite integer counts, including simulations, use compact
+16-/32-bit integer storage. NaNs and fractional estimates use 32-bit floating
+point where safe; larger or smaller values that need more precision retain
+64-bit storage. Integer counts and NaNs remain exact. Fractional estimates
+undergo standard float32 rounding, recorded in the embedded and companion
+metadata. A grouped bin remains NaN if any of its native samples
+is missing. Choose **Native timing** to preserve the exact native gaps and
+repaired bins. Numeric choices sum adjacent native bins over the recorded
+numeric arrival-time window, with calibration retained in the metadata.
+
+TRI2 3.0 is a 32-bit application and allocates additional copies when loading
+ICS data. A 1024 × 1024 × 256 floating-point stack can exceed its address
+space even with float32 storage. Restart TRI2 after an allocation failure:
+failed loading can retain a large buffer and prevent smaller files opening.
+Reduce the bin count if appropriate (128 bins sums pairs over the same
+numeric arrival window), or use a smaller spatial image. Whether a file fits
+also depends on TRI2's other allocations. Compression reduces disk size,
+not these loading buffers. Full
+floating-point exports remain valid for software with more address space.
+The supplied 1024 × 1024 mScar3 example with NaN filtering was successfully
+opened in TRI2 after restart using float32 storage and 128 bins. Its full
+image and arrival window are retained; bin width increases from 96.97 ps to
+193.94 ps. The 256-bin float32 version exceeded TRI2's loading capacity.
+
+PTU omits matching actual photon records in every mode, preserving scan
+markers and remaining native arrival values. It excludes reflection events
+rather than creating missing, interpolated or simulated events; this is
+explained in the export window. JSON sidecars record the mode, boundaries,
+excluded measured photons and separate estimated-count totals. Synthetic
+values are never counted as measured photons. ICS headers and JSON, CSV and
+HTML companions identify the treatment, synthetic native interval, affected
+output bins, and separate expected/simulated count totals. Simulation also
+records the base and derived realization seeds (as exact decimal strings),
+PRNG, NumPy version, sampling order and seed context. Keep this provenance
+with the exported file. PTU records the requested mode and actual event
+exclusion; it contains no synthetic replacement photons. Unchecked exports
+retain the usual photon-selection behaviour.
 
 PTU **Recorded scan timing when complete** uses a nominal reconstructed scan
 only when the necessary recorded periods are consistent. Otherwise it produces

@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QVBoxLayout,
     QWidget,
@@ -13,14 +14,18 @@ from .dataset import DatasetInfo
 from .reflection_export import ReflectionWindow, reflection_window
 
 _FILTER_LABEL = "Filter reflection photons where applicable"
+_NO_PEAKS = "No reflection peaks identified."
 
 
 class ExportReflectionSelection(QWidget):
     """Separate export exclusion from the preview checkbox."""
 
-    def __init__(self, windows: tuple[ReflectionWindow, ...]) -> None:
+    def __init__(
+        self, windows: tuple[ReflectionWindow, ...], *, event_format=False
+    ) -> None:
         super().__init__()
         self.available = windows
+        self.event_format = event_format
         self._matching_windows: tuple[ReflectionWindow, ...] = ()
         self.checkbox = QCheckBox()
         self.checkbox.setAccessibleName(_FILTER_LABEL)
@@ -31,12 +36,23 @@ class ExportReflectionSelection(QWidget):
             "Outputs without boundaries skip reflection filtering."
         )
         self.checkbox.setEnabled(False)
-        self.status = QLabel("No reflection peak identified.")
+        self.status = QLabel(_NO_PEAKS)
         self.status.setWordWrap(True)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.checkbox, alignment=Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(self.status)
+        status_row = QHBoxLayout()
+        status_row.addWidget(self.checkbox)
+        status_row.addWidget(self.status, 1)
+        layout.addLayout(status_row)
+        explanation = QLabel(
+            "PTU excludes actual reflection events in every mode. "
+            "It does not export missing, interpolated or simulated counts."
+            if event_format
+            else "Filtered ICS uses each saved treatment and simulation "
+            "seed. Metadata identifies synthetic bins and their method."
+        )
+        explanation.setWordWrap(True)
+        layout.addWidget(explanation)
 
     @property
     def windows(self) -> tuple[ReflectionWindow, ...]:
@@ -59,7 +75,7 @@ class ExportReflectionSelection(QWidget):
         )
         self.checkbox.setEnabled(bool(matches))
         self.status.setText(
-            "No reflection peak identified."
+            _NO_PEAKS
             if not self.available
             else "Select outputs with reflection boundaries defined."
             if not targets

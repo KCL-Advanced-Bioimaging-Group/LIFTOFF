@@ -23,6 +23,7 @@ from .gui_helpers import (
 )
 from .gui_workspace_state import WorkspaceState
 from .mosaic_views import tile_view
+from .repetition_rate import repetition_rate_text
 
 
 class WorkspaceChannels(WorkspaceState):
@@ -136,6 +137,15 @@ class WorkspaceChannels(WorkspaceState):
         count_label.setMinimumHeight(0)
         count_label.setText("\n".join(count_lines))
         self.fields["Memory block"].setText(first.memory_id)
+        rates = list(
+            dict.fromkeys(repetition_rate_text(item) for item in group)
+        )
+        self.fields["Repetition rate"].setText("\n".join(rates))
+        self.fields["Repetition rate"].setToolTip(
+            "Selected: recorded WLL pulse-picker setting. "
+            "Actual: recorded detector/sequence LaserPulseFrequency. "
+            "Missing settings remain unavailable."
+        )
 
     def _main_window_select_block_4(self, item: QListWidgetItem) -> None:
         if (
@@ -219,6 +229,7 @@ class WorkspaceChannels(WorkspaceState):
         )
         self.fields["Photons"].setText("No recorded pairs selected")
         self.fields["Histogram cube"].setText("Not loaded")
+        self.fields["Repetition rate"].setText("-")
         self.fields["Decoder"].setText("No recorded pairs selected")
         self.fields["Decode time"].setText("-")
         self.backend_label.setText("Decoder: not loaded")
@@ -319,6 +330,7 @@ class WorkspaceChannels(WorkspaceState):
         self.fields["Rows"].setText(rows)
         self.fields["Photons"].setText(dataset.raw_photon_label)
         self.fields["Memory block"].setText(dataset.memory_id)
+        self.fields["Repetition rate"].setText(repetition_rate_text(dataset))
         for name in ("Histogram cube", "Decoder", "Threads", "Decode time"):
             self.fields[name].setText("Preparing")
         self.plane_combo.blockSignals(True)
@@ -520,8 +532,9 @@ class WorkspaceChannels(WorkspaceState):
         excluded = sum(panel["cube"].overflow_events for panel in panels)
         self.fields["Histogram cube"].setToolTip(
             f"Arrival window excludes {excluded:,} selected photons "
-            "across the displayed images; the same window policy "
-            "is used for calibrated exports."
+            "across the displayed images. Native timing exports use this "
+            "window; numeric ICS exports use a power-of-two native window "
+            "calculated from the repetition rate."
         )
         if excluded:
             self.status_label.setText(

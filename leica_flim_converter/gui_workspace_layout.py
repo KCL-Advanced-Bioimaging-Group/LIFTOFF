@@ -419,6 +419,7 @@ class WorkspaceLayout(WorkspaceState):
                 "Photons",
                 "Memory block",
                 "Histogram cube",
+                "Repetition rate",
                 "Decoder",
                 "Threads",
                 "Decode time",
@@ -427,6 +428,10 @@ class WorkspaceLayout(WorkspaceState):
         }
         for name, label in self.fields.items():
             label.setWordWrap(True)
+            if name == "Repetition rate":
+                label.setSizePolicy(
+                    QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+                )
             label.setAlignment(
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
             )

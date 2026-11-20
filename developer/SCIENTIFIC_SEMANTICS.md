@@ -58,11 +58,42 @@ at 78.02 MHz and 129 at 80 MHz for the supplied 96.9697 ps clock. A native index
 maps directly to its corresponding native bin. The final bin retains its full
 clock width, so its upper edge can extend beyond the laser period.
 
-ICS numeric choices explicitly rebin one unrounded recorded laser period.
-Physical half-open boundaries `[i * step, (i + 1) * step)` determine assignment.
-The same boundary lookup feeds native and Python decoders; arrivals outside the
-window are excluded and counted, never clipped into the final bin. PTU preserves
-those arrivals, allowing independent reconciliation of included/excluded counts.
+ICS numeric choices are powers of two from 16 through 32768. The full-resolution
+native window N is the nearest power of two to `1 / (selected_rate * clock)`;
+absolute distance in native bins determines the result, with halfway ties
+choosing the smaller power. A missing/invalid selected setting uses the actual
+recorded detector/sequence rate as an explicitly labelled fallback. The numeric
+grid metadata records that rate's value, units, source and role. Windows above
+32768 native increments are rejected; windows below 16 permit Native timing only.
+
+Numeric exports retain native indices 0 through N-1. N output bins preserve
+the full-precision recorded clock width. Smaller counts sum adjacent groups
+of `N / output_bins`, with widths equal to that integer times the clock.
+Assignment uses integer division, avoiding floating-point boundary drift.
+All numeric choices share `[0, N * clock)`. Arrivals at index N and above
+are excluded and counted, never clipped into the final bin. The same integer
+lookup feeds native and Python decoders. Output counts above N are rejected.
+For the supplied clock, selected 80/40/20/10 MHz gives N=128/256/512/1024.
+
+The GUI defaults to N and labels it with the rate, e.g. `256 (default for 40MHz)`.
+Options above N remain visible but disabled. A batch uses the smallest N among
+checked outputs, or all loaded datasets before any are checked. The automatic
+default follows changes in that selection; explicit valid downsampling/Native
+choices persist. Both GUI defaults and numeric windows use the actual rate
+when the selected rate is unavailable. The dropdown tooltip and numeric grid
+metadata identify the fallback. The API's explicit bin count is validated
+per dataset; Native timing remains `bins=None`.
+Native timing retains the preview grid described above. PTU preserves native
+arrivals, allowing independent reconciliation of included/excluded counts.
+
+The info panel's repetition rate separates the selected WLL pulse-picker
+setting from the actual recorded detector/sequence LaserPulseFrequency. The
+selected setting comes from the matched source's PulsePickerRatio (MHz) in
+the enabled detector/sequence settings, with the same acquisition/master
+inheritance restrictions as other acquisition settings. Invalid or ambiguous
+settings remain unavailable; an MP detector never borrows a WLL setting. The
+selected rate or explicit actual-rate fallback defines the numeric window.
+The recorded clock and source calibration are never rewritten.
 
 A cached cube is reused only for matching dataset/plane, photon selection,
 clock, window, and exactly aligned grouping boundaries. Legacy cubes without a
@@ -131,18 +162,58 @@ partial placement restores any previously committed boundaries. The pointer
 prompt and manual state are cleared on completion, cancellation, loading a new
 preview, or hiding the graph. Manual placement has no effect on photon data.
 
-The optional **Filter reflection photons** preview filter excludes native bin
-centres in the inclusive interval `[lower, upper]`, including fractional
-boundary positions without rounding to the nearest bin. Retained bin counts
-are summed per pixel in uint64 and rendered with the usual preview contrast.
-The same interval is omitted from every corresponding graph, with a white gap
-and no connecting curve. Each channel uses its own bounds; mosaic tiles share
-their channel's bounds. Filtering is applied after the current event selection.
-Decoded cubes, original histogram vectors, timing and exports remain intact.
-Unchecking restores the exact prior image and the original curves. Boundaries
-are locked while filtering and can be adjusted after unchecking. The workspace
-remembers committed intervals and the preview toggle for each detector and T/Z
-view while its source is loaded. Returning to that view restores its settings.
+The optional **Filter reflection** preview treatment affects native bin
+centres in the inclusive interval `[lower, upper]`. **Assign to NaNs** stores
+missing samples rather than zeros. The other two modes are **Interpolate
+values (smooth)** and **Simulate photon counts from interpolation**. They
+share the whole-image log-linear endpoint bridge for the corresponding decoded
+detector/ tile and T/Z view or export output. Original decoded cubes are
+retained and restored exactly when treatment is disabled.
+
+Let `C[i]` sum all pixels at native bin `i`, `S=ceil(lower)`,
+`E=floor(upper)`, `a=S-1`, `b=E+1`, and `t=(i-a)/(b-a)`. For `S..E`, the
+expected whole-image counts are `M[i]=exp((1-t)*ln(C[a])+t*ln(C[b]))`. This
+joins both exterior count endpoints exactly in log space. Only these two
+positive finite samples are required: there is no derivative estimate, extra
+exterior stencil, pseudocount or Gaussian smoothing. Missing/non-positive
+endpoints leave the interval NaN.
+
+For pixel `p`, let `A_p` sum its native counts outside `S..E`; define
+`w_p=A_p/sum(A)`. Smooth replacement is `mu[i,p]=M[i]*w_p`. A pixel with no
+exterior counts has zero expected count. The sum recovers the expected whole-
+image bridge to floating precision. This is an explicit common decay shape
+with spatial allocation, not an independent estimate of each pixel's lifetime.
+All exterior samples are unchanged.
+
+Simulation draws `N[i,p] ~ Poisson(mu[i,p])` independently for each native bin
+and pixel. It draws replacement counts directly, without adding a second mean
+or generating noise at repaint/ROI time. Undefined means stay NaN. Float64
+cubes preserve missing samples and hold simulated integer counts exactly in
+the supported count range. Image projections, pixel/ROI curves and mosaic
+graph sums read the same derived cube. Smooth interpolation has a dashed graph
+overlay. Simulation shows one unconnected dot per simulated native-bin count,
+using the same axis mapping and series colour as the retained measured curve.
+
+Each committed reflection scope retains a random unsigned 64-bit base seed.
+Mode/toggle changes and boundary edits preserve it. For sampling, SHA256
+hashes versioned canonical JSON containing that seed, dataset key, plane seed
+index, event mask, exact float native boundaries and spatial shape. The first
+eight digest bytes, interpreted little endian, seed NumPy PCG64. A single
+generator samples ascending native bins and C-order spatial pixels. Thread
+count, panel order, compression and output rebinning never enter the seed.
+Plane None and plane zero share seed index zero so single-plane overviews
+replay in split exports; other plane indices give distinct streams. Integrated
+and split data can have different means. Base and realization seeds are stored
+as decimal strings to avoid JSON integer precision loss. Metadata records the
+algorithm version, generator, NumPy version, sample order and complete seed
+context.
+
+Every pixel, ROI, tile and all-pixel graph reads the same derived cube. Mosaic
+graphs pool repaired tile cubes. Missing endpoints propagate NaNs through
+spatial sums; image projections sum finite contributions. Bounds, mode, base
+seed and toggle persist per detector/T/Z view while loaded. Disabling
+treatment restores raw counts and the prior image. Boundaries stay locked
+while enabled.
 
 ICS and PTU exports provide an independent, initially unchecked reflection
 exclusion option. They snapshot saved native-bin boundaries across the loaded
@@ -155,20 +226,39 @@ checked, each output with a matching interval uses it. Outputs without a
 matching interval skip reflection filtering.
 
 ICS first obtains calibrated native counts with the requested event selection,
-retaining the usual spatial alignment. It excludes native bin centres in the
-inclusive reflection interval before assigning retained arrivals to the chosen
-physical output grid. Rebinning may therefore combine retained bins on either
-side without deleting unrelated photons. Cached preview cubes remain intact;
-already reflection-filtered caches are rejected. Native and output arrays are
-included in the filtered export's peak-memory estimate.
+covering both the native preview interval and requested output window. It
+repairs pixels using the saved mode before assigning samples to the physical
+output grid. Filtered ICS stores finite integral samples in exact unsigned
+16-/32-bit form when possible, including simulated counts. Missing or
+fractional samples use IEEE real/signed float32. Integer-valued samples and
+NaNs are preserved exactly; fractional estimates undergo float32 rounding.
+If float32 would change integer counts, overflow finite values or turn a
+nonzero into zero, the entire output retains float64. Embedded metadata and
+sidecars record the selected dtype, precision policy and maximum absolute
+rounding error. Internal calculations and previews remain float64. Grouped
+bins propagate native NaNs. The
+legacy programmatic `exclude` mode retains integer photon-exclusion behavior.
+Cached original cubes stay intact, and derived caches are rejected. Memory
+estimates include native decoding, repair, output and grouping buffers.
 
-PTU removes matching arrivals after event selection, before record encoding.
-Empty logical lines still emit scan markers. Kept arrivals retain their native
-microtimes and detector routes; raster timing is unchanged. JSON sidecars
-record boundaries and excluded counts. ICS accounting separates exported,
-reflection-excluded and outside-window photons, whose sum equals selected
-photons before reflection filtering. Reflection exclusion takes precedence
-where an excluded native arrival also lies outside a rebinned ICS window.
+PTU removes matching arrivals after event selection, before record encoding,
+regardless of the selected NaN/smooth/simulation mode. The dialog, embedded
+metadata and sidecars explain that PTU cannot represent NaNs or interpolated
+counts. Empty logical lines retain scan markers, and kept events preserve
+native microtimes and detector routes. Raster timing is unchanged.
+
+ICS accounting separates retained measured photons, removed measured
+reflection photons, and measured photons outside the time window. Their sum
+equals the selected measured events before treatment. Reflection removal takes
+precedence where native samples also lie outside a numeric ICS window.
+Synthetic expected and simulated count totals and missing sample counts are
+reported separately; replacements are never labelled as measured/exported
+photon events. Embedded ICS and JSON metadata identify synthetic native
+centres and affected output-bin indices, all spatial pixels, method and replay
+seeds. CSV/HTML summaries expose the same provenance. PTU metadata
+distinguishes the requested mode from applied event exclusion and never claims
+synthetic counts. Exported sample totals may therefore differ from measured
+photon accounting.
 
 ## Indexes and incomplete acquisitions
 
@@ -269,10 +359,10 @@ Encoding references: [libics field definitions](https://github.com/svi-opensourc
 [Bio-Formats ICS reader conventions](https://github.com/ome/bioformats/blob/develop/components/formats-bsd/src/loci/formats/in/ICSReader.java),
 and [PicoQuant tag dictionary](https://github.com/PicoQuant/PicoQuant-Time-Tagged-File-Format-Demos/blob/master/doc/apx_tagdictionary.html).
 
-ICS v2 headers retain integer size, little-endian representation, payload
+ICS v2 headers retain sample size, little-endian representation, payload
 compression, axes `bits,y,x,t`, pixel calibration in metres, and arrival-bin
 calibration in seconds in both parameter and history fields. Native 16-/32-bit counts, gzip/uncompressed payloads,
-non-square orientation and native and 128-/256-bin real exports are independently read back
+non-square orientation and native and 16-/32-/64-/128-bin exports are read back
 in tests. Existing naming and plane suffixes are retained. JSON sidecars carry
 source identity, detector/filter names, selection, calibration, integer width,
 plane ranges, alignment decisions, decoder details and reconstruction provenance.

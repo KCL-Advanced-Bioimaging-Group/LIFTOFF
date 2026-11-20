@@ -251,6 +251,31 @@ def _mosaic_rows(metadata: dict) -> list[MetadataRow]:
     return rows
 
 
+def _reflection_processing_rows(reflection):
+    """Expose synthetic-sample provenance in readable companions too."""
+    return [
+        _row("Reflection treatment", label, reflection[key])
+        for key, label in (
+            ("modeLabel", "Selected treatment"),
+            ("appliedMode", "Applied treatment"),
+            ("replacementKind", "Replacement values"),
+            ("interpolationModel", "Interpolation model"),
+            ("spatialWeighting", "Pixel allocation"),
+            ("containsSyntheticSamples", "Contains synthetic samples"),
+            ("syntheticOutputBins", "Synthetic output bins (zero-based)"),
+            ("estimatedCountSum", "Sum of synthetic expected counts"),
+            ("simulatedCountSum", "Sum of simulated photon counts"),
+            ("baseSeed", "Simulation base seed"),
+            ("randomSeed", "Simulation realization seed"),
+            ("randomGenerator", "Random generator"),
+            ("numpyVersion", "Random generator library version"),
+            ("sampleOrder", "Sampling order"),
+            ("countSumMeaning", "Replacement count interpretation"),
+        )
+        if key in reflection and reflection[key] is not None
+    ]
+
+
 def metadata_rows(sidecar: dict) -> list[MetadataRow]:
     """Render a curated summary; detailed source XML stays in JSON."""
     metadata = sidecar["acquisitionMetadata"]
@@ -330,6 +355,16 @@ def metadata_rows(sidecar: dict) -> list[MetadataRow]:
                 optics["emission"]["metadataPath"],
             )
         )
+    rows.extend(
+        _row("ICS sample encoding", label, value)
+        for key, label in (
+            ("storageDtype", "Stored sample type"),
+            ("bitsPerSample", "Bits per sample"),
+            ("precisionPolicy", "Sample precision policy"),
+            ("maximumAbsoluteRoundingError", "Maximum sample rounding error"),
+        )
+        if (value := metadata.get("sampleEncoding", {}).get(key)) is not None
+    )
     rows.extend(_spatial_rows(metadata))
     rows.extend(_mosaic_rows(metadata))
     rows.extend(_timing_rows(sidecar))
@@ -369,6 +404,7 @@ def metadata_rows(sidecar: dict) -> list[MetadataRow]:
         )
     )
     if reflection.get("enabled"):
+        rows.extend(_reflection_processing_rows(reflection))
         rows.extend(
             _row(
                 "Photon selection and counts",

@@ -5,8 +5,10 @@
 
 import json
 from dataclasses import replace
+from math import ceil, floor
 from pathlib import Path
 
+import numpy as np
 import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QMessageBox
@@ -104,12 +106,24 @@ def test_export_reflection_checkbox(
     assert export.isEnabled()
     empty = dialog_type([raw_dataset], {})
     qtbot.addWidget(empty)
+    empty.show()
     empty._set_all(Qt.CheckState.Checked)
-    assert not empty.export_reflection.checkbox.isEnabled()
-    assert (
-        empty.export_reflection.status.text()
-        == "No reflection peak identified."
-    )
+    control = empty.export_reflection
+    assert not control.checkbox.isEnabled()
+    assert control.status.text() == "No reflection peaks identified."
+    checkbox = control.checkbox.geometry()
+    status = control.status.geometry()
+    assert status.left() > checkbox.right()
+    assert abs(status.center().y() - checkbox.center().y()) <= 1
+    labels = {label.text(): label for label in empty.findChildren(QLabel)}
+    note = labels[
+        "Each export includes embedded acquisition metadata, JSON "
+        "provenance, a CSV table, and a browser-readable HTML report."
+    ]
+    note_rect = note.geometry()
+    buttons_rect = empty.buttons.geometry()
+    assert note_rect.right() < buttons_rect.left()
+    assert abs(note_rect.center().y() - buttons_rect.center().y()) <= 1
 
 
 def test_preview_boundaries_snapshot(
@@ -345,10 +359,13 @@ def test_example_export_from_workspace(
     assert cube is not None and workspace.selected is not None
     selected_key = workspace.selected.key
     bounds = next(iter(workspace.histogram.reflection.regions.values()))
-    removed = int(cube.counts[int(bounds[0]) : int(bounds[1]) + 1].sum())
+    first, stop = ceil(bounds[0]), floor(bounds[1]) + 1
+    removed = int(cube.counts[first:stop].sum())
     destination = tmp_path / format_name
 
     def accept_export(dialog):
+        if isinstance(dialog, IcsExportDialog):
+            dialog.bins.setCurrentIndex(dialog.bins.findData(None))
         dialog._set_all(Qt.CheckState.Unchecked)
         for row, target in enumerate(dialog.row_targets):
             if (
@@ -394,10 +411,17 @@ def test_example_export_from_workspace(
     if format_name == "ics":
         information = metadata["photonAccounting"]
         assert information["excludedReflectionPhotons"] == removed
-        assert int(read_ics(files[0]).counts.sum()) == cube.events - removed
+        counts = read_ics(files[0]).counts
+        assert counts.shape == cube.counts.shape
+        assert np.isnan(counts[first:stop]).all()
+        np.testing.assert_array_equal(counts[:first], cube.counts[:first])
+        np.testing.assert_array_equal(counts[stop:], cube.counts[stop:])
+        retained = cube.events - removed
+        assert int(np.nansum(counts, dtype=np.float64)) == retained
+        assert information["exportedPhotons"] == retained
     else:
         information = metadata["export"]
         assert information["excludedReflectionPhotons"] == removed
         photons = inspect_ptu(files[0])
-        assert not photons.microtime[int(bounds[0]) : int(bounds[1]) + 1].any()
+        assert not photons.microtime[first:stop].any()
         assert photons.photons == cube.events + cube.overflow_events - removed

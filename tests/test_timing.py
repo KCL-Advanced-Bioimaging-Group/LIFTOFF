@@ -21,6 +21,7 @@ from leica_flim_converter.export_inspection import (
 from leica_flim_converter.gui_ics_dialog import IcsExportDialog
 from leica_flim_converter.gui_models import required_table_item
 from leica_flim_converter.gui_ptu_dialog import PtuExportDialog
+from leica_flim_converter.ics import ALLOWED_BINS
 from leica_flim_converter.ics_export import IcsExportOptions, export_ics_blocks
 from leica_flim_converter.native_decoder import decode_histogram_plane
 from leica_flim_converter.ptu import parse_ptu
@@ -75,7 +76,7 @@ def assert_cross_format(dataset, directory, bins, mask):
     return metadata
 
 
-@pytest.mark.parametrize("bins", [None, 32, 128, 256])
+@pytest.mark.parametrize("bins", [None, 16, 32, 64, 128])
 @pytest.mark.parametrize(
     "clock,frequency",
     [
@@ -92,6 +93,16 @@ def test_physical_time_cross_format(
     dataset = replace(
         raw_dataset, clock_period_s=clock, laser_frequency_hz=frequency
     )
+    limit = {
+        (1e-10, 625e6): 16,
+        (9.696969697e-11, 78.02e6): 128,
+        (2.1e-10, 80e6): 64,
+        (1e-9, 80e6): 16,
+    }[(clock, frequency)]
+    if bins is not None and bins > limit:
+        with pytest.raises(ValueError, match="upsampling is unavailable"):
+            time_grid(dataset, bins)
+        return
     assert_cross_format(dataset, tmp_path, bins, RAW_ALL_PHOTONS)
 
 
@@ -104,7 +115,7 @@ def test_scoped_sequences_cross_format(tmp_path, grammar):
         assert_cross_format(
             dataset,
             tmp_path / str(index),
-            128,
+            None,
             RAW_ALL_PHOTONS if grammar == "raw" else 7,
         )
 
@@ -231,13 +242,22 @@ def test_explicit_fallback_and_gui(raw_dataset, tmp_path, qtbot):
     )
     ics = IcsExportDialog([raw_dataset], {})
     qtbot.addWidget(ics)
-    assert ics.options(1).bins == 128
+    assert ics.options(1).bins == 16
+    assert ics.bins.currentText() == "16 (default for 625MHz)"
+    assert ics.compression.currentText() == "GZip"
+    assert ics.options(1).compression == "gzip"
+    ics.compression.setCurrentIndex(ics.compression.findText("Uncompressed"))
+    assert ics.options(1).compression == "uncompressed"
+    assert [ics.bins.itemData(index) for index in range(ics.bins.count())] == [
+        None,
+        *ALLOWED_BINS,
+    ]
     ics.bins.setCurrentIndex(0)
     assert ics.options(1).bins is None
     assert time_grid(raw_dataset, None).step_s == raw_dataset.clock_period_s
 
 
-@pytest.mark.parametrize("bins", [None, 32, 128])
+@pytest.mark.parametrize("bins", [None, 16])
 @pytest.mark.parametrize("mask", [256, 512, 1024])
 def test_native_raw_calibration_parity(raw_dataset, bins, mask):
     """Native and streaming paths agree at every pixel and bin."""
@@ -274,6 +294,9 @@ def test_native_compressed_calibration_parity(tmp_path, bins, mask):
     """Compare fast mapped decoding with the literal-stream oracle."""
     datasets = scan_lif(mixed_compressed_lif(tmp_path / "mixed.lif"))
     for dataset in datasets:
+        dataset = replace(
+            dataset, clock_period_s=9.696969697e-11, laser_frequency_hz=80e6
+        )
         grid = time_grid(dataset, bins)
         native = decode_histogram_plane(
             dataset,

@@ -244,10 +244,15 @@ def test_real_example_graph(qtbot: QtBot) -> None:
 
 
 def open_example_workspace(
-    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    source: Path | None = None,
+    acquisition_name: str = "mScar3-Pyr_FLIM04_40MHz",
+    single_event: bool = True,
 ) -> MainWindow:
     """Open the supplied example using production controls."""
-    source = example_path("CellMaskandmScar3.lif")
+    source = source or example_path("CellMaskandmScar3.lif")
     if source is None:
         pytest.skip("Optional reflection example LIF is unavailable")
     monkeypatch.setattr(
@@ -268,12 +273,13 @@ def open_example_workspace(
             ),
             DatasetInfo,
         )
-        and dataset.acquisition_name == "mScar3-Pyr_FLIM04_40MHz"
+        and dataset.acquisition_name == acquisition_name
     )
     window.select_block(item)
     qtbot.waitUntil(lambda: window.decode_worker is None, timeout=120000)
-    window.event_flags.raw_standard.click()
-    qtbot.waitUntil(lambda: window.decode_worker is None, timeout=120000)
+    if single_event:
+        window.event_flags.raw_standard.click()
+        qtbot.waitUntil(lambda: window.decode_worker is None, timeout=120000)
     return window
 
 

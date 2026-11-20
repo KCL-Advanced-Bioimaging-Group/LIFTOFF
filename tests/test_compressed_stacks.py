@@ -75,7 +75,7 @@ def test_partial_stack_exports(tmp_path, mask, explicit):
     images = export_ics_blocks(
         datasets,
         tmp_path / "ics",
-        options=IcsExportOptions(bins=32, event_flag_mask=mask),
+        options=IcsExportOptions(bins=None, event_flag_mask=mask),
     )
     ptus = export_ptu_blocks(
         datasets,
@@ -86,7 +86,9 @@ def test_partial_stack_exports(tmp_path, mask, explicit):
     for position, (image, ptu) in enumerate(zip(images, ptus, strict=True)):
         assert image["status"] == ptu["status"] == "exported"
         channel, plane = divmod(position, 5)
-        expected = expected_stack_cube(spec, plane, channel, mask, bins=32)
+        expected = expected_stack_cube(
+            spec, plane, channel, mask, bins=20 if channel else 10
+        )
         np.testing.assert_array_equal(
             read_ics(Path(image["path"])).counts, expected
         )

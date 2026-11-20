@@ -243,7 +243,7 @@ def test_detector_calibration_overrides_its_sequence(tmp_path: Path) -> None:
 def test_sequence_exports_and_wrong_cache(tmp_path: Path) -> None:
     """Export each pair/T/Z plane, rejecting foreign or plane caches."""
     datasets = scan_lif(mixed_lif(tmp_path / "mixed.lif"))
-    options = IcsExportOptions(bins=32, event_flag_mask=RAW_ALL_PHOTONS)
+    options = IcsExportOptions(bins=None, event_flag_mask=RAW_ALL_PHOTONS)
     results = export_ics_blocks(datasets, tmp_path / "ics", options)
     assert len(results) == 16
     for result in results:

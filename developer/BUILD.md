@@ -97,7 +97,7 @@ An opt-in diagnostic command exercises the actual executable without an external
 Python installation:
 
 ```powershell
-.\LIFTOFF_App_3.2.2.exe --verify-release C:\path\to\evidence
+.\LIFTOFF_App_3.2.3.exe --verify-release C:\path\to\evidence
 ```
 
 Add repeated `--verify-lif C:\path\to\sample.lif` arguments to check native

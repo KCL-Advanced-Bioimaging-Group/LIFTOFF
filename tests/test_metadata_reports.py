@@ -19,6 +19,12 @@ from leica_flim_converter.ptu_export import PtuExportOptions, export_ptu_blocks
 from leica_flim_converter.version import APPLICATION_VERSION
 
 
+@pytest.fixture(name="raw_dataset")
+def numeric_export_dataset(raw_dataset):
+    """Use a 128-bin native period for numeric export checks."""
+    return replace(raw_dataset, laser_frequency_hz=78_125_000.0)
+
+
 def _export(dataset, destination, kind, collision="suffix"):
     if kind == "ics":
         return export_ics_blocks(
@@ -100,10 +106,10 @@ def test_report_bundle_and_recognised_headers(raw_dataset, tmp_path, kind):
         assert "sensor\ts_params\tChannels\t1\n" in text
         assert "history\tdetector\tHyD S 2\n" in text
         assert "history\tfilterset emm name\t566 - 630 nm\n" in text
-        assert rows["Exported arrival-bin width"]["Value"] == "50"
+        assert rows["Exported arrival-bin width"]["Value"] == "400"
         image = read_ics(target)
         assert float(image.header["parameter/scale"][-1]) == pytest.approx(
-            50e-12
+            400e-12
         )
         assert int(image.counts.sum()) == 6
     else:

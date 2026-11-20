@@ -102,7 +102,7 @@ def test_invalid_batch_entry_does_not_stop_valid_data(tmp_path, format_name):
     )
     if format_name == "ics":
         result = export_ics_blocks(
-            [invalid, valid], tmp_path / "output", IcsExportOptions(bins=32)
+            [invalid, valid], tmp_path / "output", IcsExportOptions(bins=None)
         )
     else:
         result = export_ptu_blocks(

@@ -124,9 +124,9 @@ class IntensityContrast(QWidget):
                 width = (end - start) / composite.width() * base.width()
         return QRectF(
             left + _PLOT_LEFT_MARGIN,
-            20,
+            6,
             max(1, width - _PLOT_LEFT_MARGIN - _PLOT_RIGHT_MARGIN),
-            54,
+            68,
         )
 
     def render_image(self) -> None:
@@ -170,16 +170,6 @@ class IntensityContrast(QWidget):
         painter.setPen(QPen(QColor("#9aa6b2"), 1))
         painter.drawRect(rect)
         painter.setPen(QColor("#33424f"))
-        painter.drawText(
-            QRectF(rect.left(), 0, rect.width(), 18),
-            Qt.AlignmentFlag.AlignCenter,
-            (
-                "Pixels (log)   "
-                if self.log_scale_button.isChecked()
-                else "Pixels   "
-            )
-            + f"P{self.levels[index][0]:.2f} – P{self.levels[index][1]:.2f}",
-        )
         low, high = distribution.axis_limits()
         self._draw_ticks(painter, rect, low, high)
         path = QPainterPath()
@@ -214,10 +204,33 @@ class IntensityContrast(QWidget):
             value = distribution.quantile(percentile)
             x = rect.left() + (value - low) / (high - low) * rect.width()
             painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
+        black_level, white_level = self.levels[index]
+        painter.setPen(Qt.GlobalColor.black)
+        painter.save()
+        painter.translate(
+            rect.left() - _PLOT_LEFT_MARGIN / 2, rect.center().y()
+        )
+        painter.rotate(-90)
         painter.drawText(
-            QRectF(rect.left(), 93, rect.width(), 18),
+            QRectF(
+                -rect.height() / 2,
+                -_PLOT_LEFT_MARGIN / 2,
+                rect.height(),
+                _PLOT_LEFT_MARGIN,
+            ),
             Qt.AlignmentFlag.AlignCenter,
-            "Intensity",
+            "Pixels (log)" if logarithmic else "Pixels",
+        )
+        painter.restore()
+        painter.drawText(
+            QRectF(
+                rect.left() - _PLOT_LEFT_MARGIN,
+                rect.bottom() + 19,
+                rect.width() + _PLOT_LEFT_MARGIN + _PLOT_RIGHT_MARGIN,
+                18,
+            ),
+            Qt.AlignmentFlag.AlignCenter,
+            f"Intensity (P{black_level:.2f} - P{white_level:.2f})",
         )
 
     def _draw_ticks(

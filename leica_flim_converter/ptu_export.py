@@ -247,7 +247,14 @@ def _ptu_acquisition_metadata(
         options.reflection_windows, dataset, linear_plane
     )
     metadata["reflectionFilter"] = (
-        window.metadata(dataset.clock_period_s)
+        {
+            **window.metadata(dataset.clock_period_s, event_format=True),
+            "appliedMode": "exclude events",
+            "formatExplanation": (
+                "PTU excludes reflection events; "
+                "no synthetic counts are generated"
+            ),
+        }
         if window
         else {"enabled": False}
     )
@@ -717,7 +724,16 @@ def _filtered_ptu_metadata(
         microtime_resolution,
     )
     metadata["reflectionFilter"] = (
-        buffer.reflection.metadata(dataset.clock_period_s)
+        {
+            **buffer.reflection.metadata(
+                dataset.clock_period_s, event_format=True
+            ),
+            "appliedMode": "exclude events",
+            "formatExplanation": (
+                "PTU excludes reflection events; "
+                "no synthetic counts are generated"
+            ),
+        }
         if buffer.reflection
         else {"enabled": False}
     )

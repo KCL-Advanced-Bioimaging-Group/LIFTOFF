@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -44,7 +44,7 @@ from .reflection_export import (
     reflection_window,
 )
 from .spatial_metadata import source_metadata, spatial_calibration
-from .timing import TimeGrid, recorded_timing, time_grid
+from .timing import TimeGrid, native_source_grid, recorded_timing, time_grid
 from .version import application_metadata
 
 BatchProgress = Callable[[str, float, float], None]
@@ -56,7 +56,7 @@ class IcsExportOptions:
     """Immutable binning, compression and selection options."""
 
     bins: int | None = 128
-    compression: str = "gzip"
+    compression: str = "uncompressed"
     collision: str = "suffix"
     threads: int | None = None
     dimension_mode: str = "split"
@@ -109,7 +109,7 @@ def rebin_cube(
         return None
     source_bins = int(cube.counts.shape[0])
     if source_bins == bins:
-        return cube
+        return replace(cube, time_grid=grid) if grid is not None else cube
     if bins > source_bins or source_bins % bins:
         return None
     factor = source_bins // bins
@@ -121,8 +121,16 @@ def rebin_cube(
         if not np.array_equal(source_edges, target_edges):
             return None
     counts = cube.counts.reshape(bins, factor, *cube.counts.shape[1:]).sum(
-        axis=1, dtype=np.uint64
+        axis=1,
+        dtype=np.float64 if cube.counts.dtype.kind == "f" else np.uint64,
     )
+    if counts.dtype.kind == "f":
+        return replace(
+            cube,
+            counts=counts.astype(np.float64, copy=False),
+            time_grid=grid,
+            output_bits=64,
+        )
     maximum = int(counts.max(initial=0))
     if maximum > np.iinfo(np.uint32).max:
         raise OverflowError("Rebinned histogram exceeds uint32")
@@ -283,6 +291,8 @@ def _sidecar(
             "encodedRowCount": encoded_row_count,
         },
         "integerBits": export["bits"],
+        "sampleFormat": export["sampleFormat"],
+        "sampleEncoding": export["sampleEncoding"],
         "byteOrder": export["byteOrder"],
         "axisOrder": export["axisOrder"],
         "compression": export["compression"],
@@ -393,8 +403,10 @@ def _export_plane(job: _IcsPlaneJob) -> dict:
         window = reflection_window(
             job.options.reflection_windows, job.dataset, job.linear_plane
         )
-        decode_grid = time_grid(job.dataset, None) if window else grid
+        decode_grid = native_source_grid(job.dataset, grid) if window else grid
         cube = job.cached.get(job.dataset.key)
+        if cube is not None and cube.reflection_processing is not None:
+            cube = None
         if (
             cube is None
             or cube.source_dataset_key != job.dataset.key
@@ -448,6 +460,8 @@ def _export_plane(job: _IcsPlaneJob) -> dict:
             if window
             else {"enabled": False}
         )
+        if cube.reflection_processing is not None:
+            metadata["reflectionFilter"].update(cube.reflection_processing)
         export = write_ics(
             target,
             cube.counts,
@@ -469,11 +483,13 @@ def _export_plane(job: _IcsPlaneJob) -> dict:
             job.linear_plane,
             job.options.dimension_mode,
         )
-        sidecar["reflectionFilter"] = (
-            window.metadata(job.dataset.clock_period_s)
-            if window
-            else {"enabled": False}
-        )
+        sidecar["reflectionFilter"] = metadata["reflectionFilter"]
+        if cube.reflection_processing is not None:
+            sidecar["reflectionProcessing"] = cube.reflection_processing
+            sidecar["photonAccounting"]["exportedPhotonsMeaning"] = (
+                "Measured retained photons only; "
+                "excludes synthetic expected and simulated counts"
+            )
         reports = write_companions(target, sidecar)
         return {
             "dataset": job.dataset.display_name,

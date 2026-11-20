@@ -27,7 +27,7 @@ from .gui_export_reflection import (
     ExportReflectionSelection,
     add_export_filter_rows,
 )
-from .gui_export_table import ExportTableMixin, add_export_metadata_note
+from .gui_export_table import ExportTableMixin, add_export_footer
 from .gui_helpers import _source_groups_3
 from .gui_models import connect_signal, required_table_item
 from .ptu_export import PtuExportOptions, proposed_ptu_filenames
@@ -52,7 +52,9 @@ class PtuExportDialog(ExportTableMixin):
         self.setWindowTitle("Export PicoQuant PTU event files")
         self.resize(1100, 620)
         self.event_flags = EventFlagSelector(event_flag_mask, self)
-        self.export_reflection = ExportReflectionSelection(reflection_windows)
+        self.export_reflection = ExportReflectionSelection(
+            reflection_windows, event_format=True
+        )
         self.active_event_flag_mask = event_flag_mask
         self.datasets = datasets
         self.states = states
@@ -108,14 +110,16 @@ class PtuExportDialog(ExportTableMixin):
         add_export_filter_rows(
             layout, self.event_flags, self.export_reflection
         )
-        add_export_metadata_note(
-            layout,
+        timing_note = QLabel(
             "Photon positions and microtimes are decoded from "
             "Leica data. Complete recorded scan periods allow "
             "a nominal reconstructed "
             "timeline; otherwise a labelled synthetic raster is used. "
-            "Neither restores the original individual photon timestamps. ",
+            "Neither restores the original individual photon timestamps."
         )
+        timing_note.setWordWrap(True)
+        timing_note.setStyleSheet("color:#53616e")
+        layout.addWidget(timing_note)
         connect_signal(
             self.export_reflection.checkbox.toggled, self._selection_changed
         )
@@ -141,8 +145,8 @@ class PtuExportDialog(ExportTableMixin):
         connect_signal(
             self.source_folders.toggled, self._destination_mode_changed
         )
-        layout.addWidget(self.buttons)
-        connect_signal(self.table.itemChanged, self._selection_changed)
+        add_export_footer(layout, self.buttons)
+        connect_signal(self.table.itemChanged, self._row_selection_changed)
 
     def _ptu_export_dialog___init_8(self, *args, **kwargs):
         self._ptu_export_dialog___init_9(*args, **kwargs)
@@ -229,8 +233,7 @@ class PtuExportDialog(ExportTableMixin):
                         self.table.setItem(row, column, item)
         self.table.blockSignals(False)
 
-    def _ptu_export_dialog__selection_changed_3(self, *_args) -> None:
-        self._update_group_selection(_args)
+    def _ptu_export_dialog__selection_changed_3(self) -> None:
         selected_rows = sum(
             (
                 target is not None
@@ -323,8 +326,8 @@ class PtuExportDialog(ExportTableMixin):
             reflection_windows=self.export_reflection.windows,
         )
 
-    def _selection_changed(self, *args):
-        self._ptu_export_dialog__selection_changed_3(*args)
+    def _selection_changed(self, *_args):
+        self._ptu_export_dialog__selection_changed_3()
         self._correct_estimate_2()
         self._update_reflection_selection()
 

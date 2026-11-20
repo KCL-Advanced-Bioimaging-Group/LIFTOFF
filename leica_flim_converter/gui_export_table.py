@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -38,18 +39,22 @@ from .gui_helpers import (
 from .gui_models import connect_signal, required_table_item
 from .mosaic import MOSAIC_INTEGRATION_ERROR
 from .raster_timing import raster_timing
-from .timing import require_calibration, time_grid
+from .reflection_export import reflection_window
+from .timing import native_source_grid, require_calibration, time_grid
 
 
-def add_export_metadata_note(layout: QVBoxLayout, prefix: str = "") -> None:
-    """Describe the companions in both export dialogs."""
+def add_export_footer(layout: QVBoxLayout, buttons: QDialogButtonBox) -> None:
+    """Place the metadata note beside the export buttons."""
     note = QLabel(
-        prefix + "Each export includes embedded acquisition metadata, "
-        "JSON provenance, a CSV table and a browser-readable HTML report."
+        "Each export includes embedded acquisition metadata, "
+        "JSON provenance, a CSV table, and a browser-readable HTML report."
     )
     note.setWordWrap(True)
     note.setStyleSheet("color:#53616e")
-    layout.addWidget(note)
+    footer = QHBoxLayout()
+    footer.addWidget(note, 1)
+    footer.addWidget(buttons, alignment=Qt.AlignmentFlag.AlignVCenter)
+    layout.addLayout(footer)
 
 
 class ExportTableMixin(QDialog):
@@ -789,25 +794,21 @@ class ExportTableMixin(QDialog):
         self.header_groups[header_row] = group
         return (group, header_row)
 
-    def _update_group_selection(self, args: tuple) -> None:
-        """Synchronize source headers when an individual export item
-        changes.
-        """
-        if args and isinstance(args[0], QTableWidgetItem):
-            item = args[0]
-            if item.column() == 0:
-                row = item.row()
-                target = self.row_targets[row]
-                if target is None:
-                    self._toggle_group(
-                        self.header_groups[row], item.checkState()
-                    )
-                else:
-                    dataset, _plane = target
-                    group = os.path.normcase(
-                        str(Path(dataset.source).expanduser().resolve())
-                    )
-                    self._sync_group_header(group)
+    def _row_selection_changed(self, item: QTableWidgetItem) -> None:
+        """Synchronize selection when the checkbox column changes."""
+        if item.column() != 0:
+            return
+        row = item.row()
+        target = self.row_targets[row]
+        if target is None:
+            self._toggle_group(self.header_groups[row], item.checkState())
+        else:
+            dataset, _plane = target
+            group = os.path.normcase(
+                str(Path(dataset.source).expanduser().resolve())
+            )
+            self._sync_group_header(group)
+        self._selection_changed()
 
     def _choose_folder(self) -> None:
         """Implemented by each format's existing file-dialog
@@ -831,31 +832,33 @@ class ExportTableMixin(QDialog):
             )
         ]
         self.export_reflection.update_targets(targets)
-        reflected = {
-            window.dataset_key for window in self.export_reflection.windows
-        }
-        if self.export_format == "ics" and reflected:
-            peak = max(
-                (
-                    dataset.width
-                    * dataset.height
-                    * 4
-                    * (
-                        time_grid(dataset, self.bins.currentData()).bins
-                        + (
-                            time_grid(dataset, None).bins
-                            if dataset.key in reflected
-                            else 0
-                        )
-                    )
-                    for dataset in self.selected_datasets()
-                ),
-                default=0,
-            )
-            self.estimate.setText(
-                re.sub(
-                    r"\d+ MB peak",
-                    f"{peak / 1048576:.0f} MB peak",
-                    self.estimate.text(),
+        windows = self.export_reflection.windows
+        if self.export_format != "ics" or not windows:
+            return
+        sizes, peaks = [], []
+        for dataset, plane in targets:
+            grid = time_grid(dataset, self.bins.currentData())
+            window = reflection_window(windows, dataset, plane)
+            real = window is not None and window.mode != "exclude"
+            pixels = dataset.width * dataset.height
+            sizes.append(pixels * grid.bins * (8 if real else 2))
+            native = native_source_grid(dataset, grid).bins if window else 0
+            peaks.append(
+                pixels
+                * (
+                    grid.bins * (8 if real else 4)
+                    + native * (20 if real else 4)
                 )
             )
+        text = re.sub(
+            r"\d+ MB peak",
+            f"{max(peaks, default=0) / 1048576:.0f} MB peak",
+            self.estimate.text(),
+        )
+        self.estimate.setText(
+            re.sub(
+                r"[\d.]+ GB total",
+                f"{sum(sizes) / 1073741824:.2f} GB total",
+                text,
+            )
+        )

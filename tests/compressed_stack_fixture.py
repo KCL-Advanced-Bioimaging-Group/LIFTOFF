@@ -24,10 +24,12 @@ class StackSpec:
     lines: int = 2
 
 
-def expected_stack_cube(spec, plane, channel, mask=15, bins=20):
+def expected_stack_cube(
+    spec, plane, channel, mask=15, bins=20, *, fixed_native=False
+):
     """Count known arrivals without using the container reader."""
     expected = np.zeros((bins, 3, 5), np.uint64)
-    period = 20 if channel else 10
+    period = 128 if fixed_native else (20 if channel else 10)
     for y in range(3):
         for x in range(5):
             expected[2 * bins // period, y, x] = (

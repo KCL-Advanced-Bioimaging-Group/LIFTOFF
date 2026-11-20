@@ -38,7 +38,7 @@ class ChannelPanel(TypedDict):
 
     dataset: DatasetInfo
     image: QImage | None
-    values: NDArray[np.uint64]
+    values: NDArray[np.uint64 | np.float64]
     events: int
     backend: str
     elapsed: float
@@ -46,7 +46,7 @@ class ChannelPanel(TypedDict):
     dtype: str
     period_bins: int
     cube: HistogramCube
-    intensity: NotRequired[NDArray[np.uint64]]
+    intensity: NotRequired[NDArray[np.uint64 | np.float64]]
     header_font_pixels: NotRequired[int]
     header_text_width: NotRequired[int]
     header_target_width: NotRequired[float]

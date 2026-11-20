@@ -26,13 +26,13 @@ class IntensityDistribution:
 
     def curve(self) -> tuple[np.ndarray, np.ndarray]:
         """Count original pixels in equal-width intensity bins."""
-        low, high = int(self.values[0]), int(self.values[-1])
-        if high - low < 256:
+        low, high = float(self.values[0]), float(self.values[-1])
+        if self.values.dtype.kind != "f" and high - low < 256:
             centres = np.arange(low, high + 1, dtype=np.float64)
             counts = np.zeros(centres.size, dtype=np.int64)
             counts[(self.values - low).astype(np.int64)] = self.counts
             return centres, counts
-        edges = np.linspace(float(low), float(high), 257)
+        edges = np.linspace(low, high if high > low else low + 1, 257)
         counts, _edges = np.histogram(
             self.values, bins=edges, weights=self.counts
         )

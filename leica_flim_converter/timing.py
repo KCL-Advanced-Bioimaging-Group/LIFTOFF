@@ -11,6 +11,21 @@ import numpy as np
 if TYPE_CHECKING:
     from .dataset import DatasetInfo
 
+ICS_BIN_CHOICES = (
+    16,
+    32,
+    64,
+    128,
+    256,
+    512,
+    1024,
+    2048,
+    4096,
+    8192,
+    16384,
+    32768,
+)
+
 
 @dataclass(frozen=True)
 class TimingValue:
@@ -117,6 +132,43 @@ def require_calibration(dataset: DatasetInfo) -> tuple[float, float]:
 
 
 @dataclass(frozen=True)
+class NumericTimeWindow:
+    """A power-of-two native window and its repetition-rate evidence."""
+
+    bins: int
+    frequency: TimingValue
+    rate_role: str
+
+
+def numeric_time_window(dataset: DatasetInfo) -> NumericTimeWindow:
+    """Use the selected rate with a labelled actual-rate fallback."""
+    clock, _actual = require_calibration(dataset)
+    selected = dataset.selected_rate_metadata
+    nominal = selected.get("value")
+    if nominal is not None:
+        frequency = TimingValue(
+            nominal * 1e6, "Hz", selected["source"], "recorded setting"
+        )
+        role = "selected"
+    else:
+        frequency = recorded_timing(dataset).laser_frequency
+        role = "actual fallback; selected rate unavailable"
+    rate = frequency.value
+    assert rate is not None
+    native_period = 1.0 / rate / clock
+    if not math.isfinite(native_period) or native_period <= 0:
+        raise ValueError(
+            "Numeric timing window is outside the supported range"
+        )
+    lower = 1 << max(0, math.floor(math.log2(native_period)))
+    upper = lower * 2
+    count = lower if native_period - lower <= upper - native_period else upper
+    if count > 32768:
+        raise ValueError("Numeric timing window exceeds 32768 native bins")
+    return NumericTimeWindow(count, frequency, role)
+
+
+@dataclass(frozen=True)
 class TimeGrid:
     """Half-open bins in native-clock units, shared by data and
     headers.
@@ -127,6 +179,8 @@ class TimeGrid:
     step_s: float
     native_step: float
     mode: str
+    window_frequency: TimingValue | None = None
+    window_frequency_role: str | None = None
 
     @property
     def extent_s(self) -> float:
@@ -137,7 +191,7 @@ class TimeGrid:
 
     def lookup(self) -> np.ndarray:
         """Share physical bin boundaries with native workers."""
-        count = math.ceil(self.extent_s / self.clock_s) + 1
+        count = self.bins * int(self.native_step) + 1
         if count > 16777216:
             raise ValueError(
                 "Timing lookup exceeds 16 million native increments"
@@ -147,13 +201,11 @@ class TimeGrid:
         return result
 
     def indices(self, arrivals: np.ndarray) -> np.ndarray:
-        """Apply physical bin boundaries without clamping events."""
-        if self.mode == "native":
-            return arrivals.astype(np.int64)
-        edges = np.arange(self.bins + 1) * self.step_s
-        return (
-            np.searchsorted(edges, arrivals * self.clock_s, side="right") - 1
-        )
+        """Group native indices exactly using integer division."""
+        factor = int(self.native_step)
+        if factor < 1 or factor != self.native_step:
+            raise ValueError("Histogram bins require whole native increments")
+        return arrivals.astype(np.int64) // factor
 
     def metadata(self) -> dict:
         """Describe boundaries and exclusion policy for independent
@@ -167,21 +219,30 @@ class TimeGrid:
             "extentSeconds": self.extent_s,
             "nativeClockSeconds": self.clock_s,
             "nativeIncrementsPerOutputBin": self.native_step,
+            "nativeWindowBins": self.bins * int(self.native_step),
+            "nativeIndexAssignment": "native arrival index // grouping factor",
             "boundaryConvention": "[i * binWidth, (i + 1) * binWidth)",
             "outOfWindowPolicy": "exclude and count; never clip",
             "quality": "recorded" if self.mode == "native" else "calculated",
             "binWidthSource": "recorded arrival clock"
             if self.mode == "native"
-            else "laser period / output bins",
+            else "recorded arrival clock * integer grouping factor",
             "windowQuality": "calculated",
             "windowSource": "complete native bins spanning one laser period"
             if self.mode == "native"
-            else "one recorded laser period",
+            else "first power-of-two native window from repetition rate",
+            "windowFrequency": self.window_frequency.metadata()
+            if self.window_frequency is not None
+            else None,
+            "windowFrequencyRole": self.window_frequency_role,
+            "windowBinCountRule": "nearest power of two; ties choose smaller"
+            if self.mode != "native"
+            else "ceil(actual laser period / native clock)",
         }
 
 
 def time_grid(dataset: DatasetInfo, bins: int | None) -> TimeGrid:
-    """Use a recorded increment or explicitly rebin one laser period."""
+    """Retain native timing or sum groups in a rate-derived window."""
     clock, frequency = require_calibration(dataset)
     native_period = 1.0 / frequency / clock
     if bins is None:
@@ -191,12 +252,34 @@ def time_grid(dataset: DatasetInfo, bins: int | None) -> TimeGrid:
         if count > 32768:
             raise ValueError("Native timing window exceeds 32768 arrival bins")
         return TimeGrid(count, clock, clock, 1.0, "native")
-    if bins < 1:
-        raise ValueError("Time bins must be positive")
-    step = 1.0 / frequency / bins
+    if bins not in ICS_BIN_CHOICES:
+        raise ValueError(f"ICS bins must be one of {ICS_BIN_CHOICES}")
+    window = numeric_time_window(dataset)
+    if bins > window.bins:
+        raise ValueError(
+            f"ICS {bins}-bin output exceeds the {window.bins}-bin native "
+            f"window ({window.rate_role}); upsampling is unavailable"
+        )
+    factor = window.bins // bins
+    step = clock * factor
     if not _positive(step):
         raise ValueError("Output time step is outside the supported range")
-    return TimeGrid(bins, clock, step, step / clock, "rebinned")
+    return TimeGrid(
+        bins,
+        clock,
+        step,
+        float(factor),
+        "rebinned",
+        window.frequency,
+        window.rate_role,
+    )
+
+
+def native_source_grid(dataset: DatasetInfo, output: TimeGrid) -> TimeGrid:
+    """Cover preview reflection bounds and the output arrival window."""
+    native = time_grid(dataset, None)
+    count = max(native.bins, output.bins * int(output.native_step))
+    return TimeGrid(count, native.clock_s, native.clock_s, 1.0, "native")
 
 
 def reconstruction_error(dataset: DatasetInfo) -> str | None:

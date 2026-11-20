@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 
 from PIL import Image
@@ -15,6 +16,7 @@ from .optical_metadata import (
     nominal_wavelength_nm,
     wavelength_label,
 )
+from .source_acquisition import selected_repetition_rate
 from .timing import AcquisitionTiming
 
 
@@ -93,6 +95,15 @@ class DatasetInfo:
     recorded_plane_count: int | None = None
     spatial_sources: tuple[dict, ...] = ()
     source_acquisition_xml: str | None = None
+
+    @cached_property
+    def _selected_rate_metadata(self) -> dict:
+        return selected_repetition_rate(self)
+
+    @property
+    def selected_rate_metadata(self) -> dict:
+        """Reuse the selected rate resolved from this dataset's XML."""
+        return self._selected_rate_metadata.copy()
 
     @property
     def detector_route(self) -> int:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QStandardItemModel
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -26,13 +27,13 @@ from .gui_export_reflection import (
     ExportReflectionSelection,
     add_export_filter_rows,
 )
-from .gui_export_table import ExportTableMixin, add_export_metadata_note
+from .gui_export_table import ExportTableMixin, add_export_footer
 from .gui_helpers import _source_groups_3
 from .gui_models import connect_signal, required_table_item
 from .ics import ALLOWED_BINS, proposed_ics_filenames
 from .ics_export import IcsExportOptions
 from .reflection_export import ReflectionWindow
-from .timing import time_grid, timing_quality
+from .timing import numeric_time_window, time_grid, timing_quality
 
 
 class IcsExportDialog(ExportTableMixin):
@@ -94,16 +95,20 @@ class IcsExportDialog(ExportTableMixin):
         self.bins.addItem("Native timing", None)
         for value in ALLOWED_BINS:
             self.bins.addItem(str(value), value)
-        self.bins.setCurrentText("128")
+        self.bins.setCurrentIndex(self.bins.findData(128))
         self.bins.setToolTip(
-            "Native timing preserves the recorded arrival increment. "
-            "Numeric choices rebin one laser period; "
-            "finer bins add no timing information. "
+            "Native timing keeps one bin per recorded arrival increment "
+            "across the laser period, including the final full bin. "
+            "Numeric choices trim to the nearest power-of-two native window "
+            "calculated from the selected repetition rate and native clock, "
+            "using the actual rate when the selected rate is unavailable. "
+            "Smaller choices sum equal groups of adjacent native bins. "
+            "Choices above the window are disabled. "
             "Photons outside the selected window are excluded "
             "and counted in the sidecar."
         )
         self.compression = QComboBox()
-        self.compression.addItem("Gzip", "gzip")
+        self.compression.addItem("GZip", "gzip")
         self.compression.addItem("Uncompressed", "uncompressed")
         self.collision = QComboBox()
         self.collision.addItem("Add numeric suffix", "suffix")
@@ -116,7 +121,6 @@ class IcsExportDialog(ExportTableMixin):
         add_export_filter_rows(
             layout, self.event_flags, self.export_reflection
         )
-        add_export_metadata_note(layout)
         connect_signal(
             self.export_reflection.checkbox.toggled, self._selection_changed
         )
@@ -139,13 +143,13 @@ class IcsExportDialog(ExportTableMixin):
         connect_signal(
             self.source_folders.toggled, self._destination_mode_changed
         )
-        connect_signal(self.bins.currentTextChanged, self._selection_changed)
+        connect_signal(self.bins.currentTextChanged, self._bins_changed)
         connect_signal(
             self.dimension_mode.currentIndexChanged,
             self._dimension_mode_changed,
         )
-        layout.addWidget(self.buttons)
-        connect_signal(self.table.itemChanged, self._selection_changed)
+        add_export_footer(layout, self.buttons)
+        connect_signal(self.table.itemChanged, self._row_selection_changed)
 
     def _ics_export_dialog___init_8(self, *args, **kwargs):
         self._ics_export_dialog___init_9(*args, **kwargs)
@@ -235,8 +239,7 @@ class IcsExportDialog(ExportTableMixin):
                         self.table.setItem(row, column, item)
         self.table.blockSignals(False)
 
-    def _ics_export_dialog__selection_changed_3(self, *_args) -> None:
-        self._update_group_selection(_args)
+    def _ics_export_dialog__selection_changed_3(self) -> None:
         selected = self.selected_datasets()
         bins = self.bins.currentData()
         selected_targets = [
@@ -298,6 +301,8 @@ class IcsExportDialog(ExportTableMixin):
     _compact_axis_modes: dict[str, dict[str, bool]]
     _compact_original_group_rows: dict[str, list[int]]
     _compact_row_planes: dict[int, list[int]]
+    _use_bin_default: bool
+    _bin_default_count: int | None
     active_event_flag_mask: int
     bins: QComboBox
     buttons: QDialogButtonBox
@@ -319,6 +324,8 @@ class IcsExportDialog(ExportTableMixin):
     table: QTableWidget
 
     def __init__(self, *args, **kwargs):
+        self._use_bin_default = True
+        self._bin_default_count = None
         self._ics_export_dialog___init_6(*args, **kwargs)
         self._esp_apply_status_2()
 
@@ -349,6 +356,7 @@ class IcsExportDialog(ExportTableMixin):
     def _dimension_mode_changed(self) -> None:
         mode = self.dimension_mode.currentData()
         self._populate_table(mode)
+        self._update_bin_choices()
         self._esp_apply_status_2()
 
     def _choose_folder(self) -> None:
@@ -376,14 +384,95 @@ class IcsExportDialog(ExportTableMixin):
             reflection_windows=self.export_reflection.windows,
         )
 
-    def _selection_changed(self, *args):
+    def _selection_changed(self, *_args):
+        self._update_bin_choices()
         for dataset in self.datasets:
             self._set_timing_quality(
                 dataset.key, self._timing_state(dataset)[2]
             )
-        self._ics_export_dialog__selection_changed_3(*args)
+        self._ics_export_dialog__selection_changed_3()
         self._correct_estimate_2()
         self._update_reflection_selection()
+
+    def _update_bin_choices(self) -> None:
+        """Limit a batch to the smallest selected native window."""
+        datasets = self.selected_datasets() or self.datasets
+        limits = []
+        windows = []
+        descriptions = []
+        for dataset in datasets:
+            try:
+                window = numeric_time_window(dataset)
+            except ValueError:
+                continue
+            limits.append(window.bins)
+            windows.append(window)
+            rate = window.frequency.value
+            assert rate is not None
+            descriptions.append(
+                f"{dataset.display_name}: {window.bins} native bins; "
+                f"{rate / 1e6:g} MHz "
+                f"({window.rate_role})"
+            )
+        limit = min(limits, default=0)
+        model = self.bins.model()
+        assert isinstance(model, QStandardItemModel)
+        binding = [window for window in windows if window.bins == limit]
+        rates = {window.frequency.value for window in binding}
+        if len(rates) == 1:
+            rate = next(iter(rates))
+            assert rate is not None
+            default_label = f"{limit} (default for {rate / 1e6:g}MHz)"
+        else:
+            default_label = f"{limit} (default for mixed rates)"
+        self._bin_default_count = limit if limit in ALLOWED_BINS else None
+        previous = self.bins.blockSignals(True)
+        try:
+            for index in range(self.bins.count()):
+                value = self.bins.itemData(index)
+                item = model.item(index)
+                assert item is not None
+                enabled = value is None or value <= limit
+                item.setEnabled(enabled)
+                if value is not None:
+                    item.setText(
+                        default_label if value == limit else str(value)
+                    )
+                item.setToolTip(
+                    "\n".join(dict.fromkeys(descriptions))
+                    if enabled
+                    else f"Exceeds the {limit}-bin native window "
+                    "for this selection"
+                )
+            value = self.bins.currentData()
+            if self._use_bin_default or (value is not None and value > limit):
+                self.bins.setCurrentIndex(
+                    self.bins.findData(self._bin_default_count)
+                )
+                self._use_bin_default = True
+        finally:
+            self.bins.blockSignals(previous)
+
+    def _bins_changed(self, *_args) -> None:
+        self._use_bin_default = (
+            self.bins.currentData() == self._bin_default_count
+        )
+        self._selection_changed()
+
+    def _timing_state(self, dataset):
+        """Keep smaller windows selectable when batch choices change."""
+        try:
+            choice = self.bins.currentData()
+            if choice is not None:
+                limit = numeric_time_window(dataset).bins
+                if limit < ALLOWED_BINS[0]:
+                    time_grid(dataset, None)
+                    return True, "", "Native timing only"
+                if choice > limit:
+                    return True, "", f"{limit}-bin maximum"
+            return super()._timing_state(dataset)
+        except ValueError as exc:
+            return False, str(exc), "Unavailable"
 
     def _flags_changed(self, mask):
         selected = self._selected_plane_sets_2()

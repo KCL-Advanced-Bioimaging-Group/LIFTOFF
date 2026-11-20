@@ -135,6 +135,8 @@ def acquisition_settings(image: ET.Element, dataset: DatasetInfo) -> dict:
             break  # Explicit invalid settings must not inherit other values.
     _selected_detector_settings(result, scopes, dataset)
     _selected_laser_settings(result, scopes, dataset)
+    if rate := _selected_repetition_rate(scopes, dataset):
+        result["LaserRepetitionRate"] = rate
     hardware = image.find("Attachment[@Name='HardwareSetting']")
     if hardware is not None:
         for field, label in (
@@ -151,6 +153,63 @@ def acquisition_settings(image: ET.Element, dataset: DatasetInfo) -> dict:
                     "source": f"HardwareSetting/@{field}",
                 }
     return result
+
+
+def selected_repetition_rate(dataset: DatasetInfo) -> dict:
+    """Read the nominal WLL pulse-picker setting for this detector."""
+    image = original_image(dataset)
+    return (
+        _selected_repetition_rate(_setting_scopes(image, dataset), dataset)
+        if image is not None
+        else {}
+    )
+
+
+def _selected_repetition_rate(scopes, dataset):
+    sources = set(dataset.excitation_sources) - {None}
+    if not sources:
+        return {}
+    for node, scope, common_only in scopes:
+        if common_only:
+            continue
+        lasers = [
+            laser
+            for laser in node.iter("Laser")
+            if laser.get("LaserName") in sources
+            or laser.get("LightSourceName") in sources
+        ]
+        # Match the source; an MP detector cannot borrow a WLL setting.
+        if len(lasers) != len(sources) or not all(
+            laser.get("LightSourceType") == "4"
+            and "PulsePickerRatio" in laser.attrib
+            for laser in lasers
+        ):
+            continue
+        raw = [laser.get("PulsePickerRatio", "") for laser in lasers]
+        try:
+            values = [float(text) for text in raw]
+            value = (
+                values[0]
+                if len(set(values)) == 1
+                and math.isfinite(values[0])
+                and values[0] > 0
+                else None
+            )
+        except ValueError:
+            value = None
+        return {
+            "label": "Selected laser repetition rate",
+            "value": value,
+            "unit": "MHz",
+            "quality": "recorded setting"
+            if value is not None
+            else "unavailable",
+            "sourceValue": "; ".join(raw),
+            "source": f"HardwareSetting/{scope}/Laser"
+            f"[@LaserName='{lasers[0].get('LaserName', '')}']"
+            "/@PulsePickerRatio",
+        }
+    return {}
 
 
 def _selected_detector_settings(result, scopes, dataset):

@@ -29,6 +29,7 @@ from . import native_decoder, raw_decoder
 from .dataset import DatasetInfo
 from .gui_mosaic import compose_mosaic_images
 from .optical_metadata import wavelength_label
+from .reflection_processing import count_dtype
 
 _esp_preflight_cache_2 = {}
 
@@ -253,10 +254,15 @@ def _histogram_log_bounds(curves, maximum: int) -> tuple[int, int]:
         values = np.asarray(raw_values).reshape(-1)
         positive = values[values > 0]
         if positive.size:
-            candidate = int(positive.min())
+            candidate = positive.min().item()
             minimum = candidate if minimum is None else min(minimum, candidate)
     # An exact power of ten stays above the lower tick, except at one.
-    lower = len(str((minimum or 1) - 1)) - 1
+    if minimum is None:
+        lower = 0
+    elif minimum < 1:
+        lower = math.floor(math.log10(minimum))
+    else:
+        lower = len(str(math.ceil(minimum) - 1)) - 1
     upper = max(lower + 1, len(str(max(1, maximum) - 1)))
     return lower, upper
 
@@ -266,7 +272,7 @@ def _draw_log_tick(painter, right: float, y: float, exponent: int) -> None:
     base = QFont("Arial", 10)
     index = QFont("Arial", 9, QFont.Weight.DemiBold)
     text = "1" if exponent == 0 else "10"
-    power = str(exponent) if exponent > 1 else ""
+    power = str(exponent) if exponent not in (0, 1) else ""
     index_width = QFontMetrics(index).horizontalAdvance(power)
     base_width = QFontMetrics(base).horizontalAdvance(text)
     painter.setFont(base)
@@ -797,14 +803,14 @@ def _panel_roi_values_2(panel, fractions, combine=False):
         is not None
     ]
     if not slices:
-        return np.zeros(view.shape[0], dtype=np.uint64)
+        return np.zeros(view.shape[0], dtype=count_dtype(view))
     if not combine:
         x0, y0, x1, y1 = slices[0]
-        return view[:, y0:y1, x0:x1].sum(axis=(1, 2), dtype=np.uint64)
+        return view[:, y0:y1, x0:x1].sum(axis=(1, 2), dtype=count_dtype(view))
     mask = np.zeros((height, width), dtype=bool)
     for x0, y0, x1, y1 in slices:
         mask[y0:y1, x0:x1] = True
-    return view[:, mask].sum(axis=1, dtype=np.uint64)
+    return view[:, mask].sum(axis=1, dtype=count_dtype(view))
 
 
 def _histogram_values_2(cube, dataset):
@@ -818,13 +824,22 @@ def _histogram_values_2(cube, dataset):
     ]
     time_axis = candidates[0] if candidates else 0
     spatial_axes = tuple(index for index in range(3) if index != time_axis)
-    return counts.sum(axis=spatial_axes, dtype=np.uint64)
+    return counts.sum(axis=spatial_axes, dtype=count_dtype(counts))
 
 
 ROI_OVERLAP_MESSAGE = (
     "Only able to display data from one unique ROI; please move mouse "
     "to one unique ROI."
 )
+
+
+def _visible_count(values, index, logarithmic):
+    """Whether a neighbouring sample can join a plotted segment."""
+    return (
+        0 <= index < len(values)
+        and np.isfinite(values[index])
+        and (not logarithmic or values[index] > 0)
+    )
 
 
 def _draw_histogram_curves(
@@ -836,12 +851,11 @@ def _draw_histogram_curves(
     *,
     log_bounds: tuple[int, int] | None = None,
     omitted: tuple[float, float] | None = None,
+    line_style: Qt.PenStyle = Qt.PenStyle.SolidLine,
 ) -> None:
     """Draw detector or ROI curves with identical scales and pen
     widths.
     """
-    left, right = (rectangle.left(), rectangle.right())
-    top, bottom = (rectangle.top(), rectangle.bottom())
     lower, upper = (0, 1)
     if logarithmic:
         lower, upper = log_bounds or _histogram_log_bounds(
@@ -851,35 +865,38 @@ def _draw_histogram_curves(
         values = np.asarray(raw_values).reshape(-1)
         path = QPainterPath()
         connected = False
-        painter.setPen(QPen(QColor(color), 2.2))
+        painter.setPen(QPen(QColor(color), 2.2, line_style))
         for value_index, value in enumerate(values):
-            count = int(value)
+            count = float(value)
             if (
-                omitted is not None and omitted[0] <= value_index <= omitted[1]
-            ) or (logarithmic and count <= 0):
+                not np.isfinite(count)
+                or (
+                    omitted is not None
+                    and omitted[0] <= value_index <= omitted[1]
+                )
+                or (logarithmic and count <= 0)
+            ):
                 connected = False
                 continue
-            x = left + value_index / max(1, values.size - 1) * (right - left)
+            x = (
+                rectangle.left()
+                + value_index / max(1, values.size - 1) * rectangle.width()
+            )
             fraction = (
                 (math.log10(count) - lower) / (upper - lower)
                 if logarithmic
                 else count / maximum
             )
-            y = bottom - fraction * (bottom - top)
+            y = rectangle.bottom() - fraction * rectangle.height()
             if not connected:
                 path.moveTo(x, y)
             else:
                 path.lineTo(x, y)
             connected = True
-            if (
-                logarithmic
-                and (value_index == 0 or values[value_index - 1] <= 0)
-                and (
-                    value_index == values.size - 1
-                    or values[value_index + 1] <= 0
-                )
-            ):
-                # Keep isolated positive bins visible between zeros.
+            if not _visible_count(
+                values, value_index - 1, logarithmic
+            ) and not _visible_count(values, value_index + 1, logarithmic):
+                # Keep isolated bins visible next to missing samples.
                 painter.drawPoint(QPointF(x, y))
         painter.drawPath(path)
 

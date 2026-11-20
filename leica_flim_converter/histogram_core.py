@@ -8,7 +8,6 @@ from time import perf_counter
 from typing import TYPE_CHECKING
 
 import numpy as np
-from numpy.typing import NDArray
 
 import patent_guided_deflate_attack as codec
 
@@ -47,22 +46,29 @@ class HistogramCube:
     linear_plane: int | None = None
     time_grid: TimeGrid | None = None
     reflection_excluded_events: int = 0
+    reflection_processing: dict | None = None
 
     @property
-    def intensity(self) -> NDArray[np.uint64]:
+    def intensity(self) -> np.ndarray:
         """Sum all arrival bins without overflowing narrow counts."""
+        if self.counts.dtype.kind == "f":
+            return np.nansum(self.counts, axis=0)
         return self.counts.sum(axis=0, dtype=np.uint64)
 
-    def pixel(self, x: int, y: int) -> NDArray[np.uint64]:
+    def pixel(self, x: int, y: int) -> np.ndarray:
         """Return the calibrated histogram for one image pixel."""
-        return self.counts[:, y, x].astype(np.uint64, copy=False)
+        return self.counts[:, y, x].astype(
+            np.float64 if self.counts.dtype.kind == "f" else np.uint64,
+            copy=False,
+        )
 
-    def roi(self, x0: int, y0: int, x1: int, y1: int) -> NDArray[np.uint64]:
+    def roi(self, x0: int, y0: int, x1: int, y1: int) -> np.ndarray:
         """Sum the inclusive ROI bounds in each arrival bin."""
         x0, x1 = sorted((x0, x1))
         y0, y1 = sorted((y0, y1))
         return self.counts[:, y0 : y1 + 1, x0 : x1 + 1].sum(
-            axis=(1, 2), dtype=np.uint64
+            axis=(1, 2),
+            dtype=np.float64 if self.counts.dtype.kind == "f" else np.uint64,
         )
 
 

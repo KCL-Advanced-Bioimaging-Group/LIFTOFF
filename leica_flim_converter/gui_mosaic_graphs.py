@@ -2,6 +2,8 @@
 
 import numpy as np
 
+from .reflection_processing import count_array
+
 
 def separated_mosaic_graphs(
     panels: list[dict], hovered_tile: int | None
@@ -30,20 +32,27 @@ def combined_mosaic_graphs(panels: list[dict]) -> list[dict]:
     result = []
     for tiles in groups.values():
         first = tiles[0]
-        values = np.zeros_like(first["values"], dtype=np.uint64)
+        dtype = (
+            np.float64
+            if any(
+                np.asarray(tile["values"]).dtype.kind == "f" for tile in tiles
+            )
+            else np.uint64
+        )
+        values = np.zeros_like(first["values"], dtype=dtype)
         curves = {}
         for tile in tiles:
-            values += np.asarray(tile["values"], dtype=np.uint64)
+            values += count_array(tile["values"])
             series = tile.get("series") or [
                 ("All pixels", tile["values"], tile["color"])
             ]
             for label, counts, color in series:
                 if label not in curves:
                     curves[label] = (
-                        np.zeros_like(counts, dtype=np.uint64),
+                        np.zeros_like(counts, dtype=dtype),
                         color,
                     )
-                curves[label][0][:] += np.asarray(counts, dtype=np.uint64)
+                curves[label][0][:] += count_array(counts)
         result.append(
             {
                 **first,

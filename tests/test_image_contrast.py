@@ -84,14 +84,20 @@ def test_image_levels_and_reset(qtbot):
 
 @pytest.mark.parametrize(("width", "tick_count"), [(155, 2), (800, 5)])
 def test_scientific_tick_labels_fit(qtbot, monkeypatch, width, tick_count):
-    """Keep scientific labels complete near the widget edge."""
+    """Keep ticks and axis labels in their respective plot areas."""
     ticks = []
+    axis_labels = {}
     draw_text = QPainter.drawText
 
     def record_ticks(painter, box, alignment, label):
         if label == "0" or "e+" in label:
             advance = painter.fontMetrics().horizontalAdvance(label)
             ticks.append((box, label, advance))
+        if label.startswith(("Intensity", "Pixels")):
+            axis_labels[label] = (
+                painter.transform().mapRect(box),
+                painter.pen().color().name(),
+            )
         return draw_text(painter, box, alignment, label)
 
     monkeypatch.setattr(QPainter, "drawText", record_ticks)
@@ -104,6 +110,13 @@ def test_scientific_tick_labels_fit(qtbot, monkeypatch, width, tick_count):
     contrast.resize(width, contrast.height())
     canvas.set_counts(np.array([[0, 2_260_000]], dtype=np.uint64))
     contrast.grab()
+
+    plot = contrast.plot_rect()
+    x_box, x_color = axis_labels["Intensity (P0.00 - P99.80)"]
+    y_box, y_color = axis_labels["Pixels"]
+    assert x_color == y_color == "#000000"
+    assert x_box.top() > plot.bottom()
+    assert y_box.right() <= plot.left()
 
     assert ticks[0][1] == "0"
     assert ticks[-1][1] == "2.26e+06"

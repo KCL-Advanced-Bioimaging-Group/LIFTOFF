@@ -36,6 +36,7 @@ from leica_flim_converter.gui_helpers import _draw_histogram_curves
 from leica_flim_converter.histogram import HistogramCube
 from leica_flim_converter.version import APPLICATION_VERSION
 from tests.test_reference_science import example_path
+from tests.test_repetition_rate import rate_dataset
 
 
 class ImmediatePreview(DecodeWorker):
@@ -213,6 +214,33 @@ def test_details_heading_clears_unselected_wavelengths(
     assert workspace.block_title.text() == (
         "<b>Synthetic</b> | Ex. unavailable / Em. 440-500 nm"
     )
+
+
+def test_repetition_rates_follow_selected_channels(
+    workspace: MainWindow, qtbot: QtBot
+) -> None:
+    """Show source rates and clear them when no pairs are selected."""
+    first = rate_dataset(workspace.datasets[0])
+    second = replace(
+        rate_dataset(workspace.datasets[1], "40"), laser_frequency_hz=39.01e6
+    )
+    workspace.datasets = [first, second]
+    workspace.pair_selector.set_datasets(workspace.datasets)
+    workspace.pair_selector.set_selection([first.key, second.key])
+    qtbot.waitUntil(lambda: workspace.decode_worker is None, timeout=10000)
+    label = workspace.fields["Repetition rate"]
+    assert label.text().splitlines() == [
+        "80 MHz (selected) / 78.02 MHz (actual)",
+        "40 MHz (selected) / 39.01 MHz (actual)",
+    ]
+    assert list(workspace.fields).index("Repetition rate") == (
+        list(workspace.fields).index("Histogram cube") + 1
+    )
+    workspace.pair_selector.set_selection([second.key])
+    qtbot.waitUntil(lambda: workspace.decode_worker is None, timeout=10000)
+    assert label.text() == "40 MHz (selected) / 39.01 MHz (actual)"
+    workspace.pair_selector.set_selection([])
+    assert label.text() == "-"
 
 
 def test_failure_without_preview_counts(

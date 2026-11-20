@@ -20,6 +20,7 @@ from .gui_mosaic import (
     restore_mosaic_extent,
 )
 from .gui_workspace_state import WorkspaceState
+from .reflection_processing import count_dtype
 
 
 class WorkspaceRois(WorkspaceState):
@@ -335,6 +336,7 @@ class WorkspaceRois(WorkspaceState):
                     % len(("#1473b8", "#d97706", "#6f42c1", "#16856b"))
                 ]
             )
+            rendered["values"] = source["values"]
             if not active:
                 rendered["series"] = [
                     ("All pixels", source["values"], channel_color)
@@ -403,7 +405,7 @@ class WorkspaceRois(WorkspaceState):
             y0, y1 = (max(0, y0), min(height - 1, y1))
             if x0 <= x1 and y0 <= y1:
                 mask[y0 : y1 + 1, x0 : x1 + 1] = True
-        result = np.zeros(counts.shape[2], dtype=np.uint64)
+        result = np.zeros(counts.shape[2], dtype=count_dtype(cube.counts))
         for y in range(height):
             xs = np.flatnonzero(mask[y])
             if xs.size:
@@ -412,7 +414,7 @@ class WorkspaceRois(WorkspaceState):
                 ends = np.r_[boundaries, xs.size - 1]
                 for start, end in zip(starts, ends, strict=False):
                     result += counts[y, xs[start] : xs[end] + 1].sum(
-                        axis=0, dtype=np.uint64
+                        axis=0, dtype=count_dtype(cube.counts)
                     )
         return result
 
@@ -431,18 +433,20 @@ class WorkspaceRois(WorkspaceState):
         )
         self.image.activated_rois = set(active)
         if not active:
-            values = cube.counts.sum(axis=(0, 1), dtype=np.uint64)
+            values = cube.counts.sum(
+                axis=(0, 1), dtype=count_dtype(cube.counts)
+            )
             self.histogram.set_series(
                 [("All pixels", values, "#1769AA")],
-                title="Pixel arrival histogram — All pixels",
-                summary=self._bin_summary_2(values.sum()),
+                title="Pixel arrival histogram â€” All pixels",
+                summary=self._bin_summary_2(np.nansum(values)),
             )
         elif self.combine_rois_checkbox.isChecked():
             values = self._combined_roi_values_2(active)
             self.histogram.set_series(
                 [("Combined ROIs", values, "#D28A00")],
-                title="Pixel arrival histogram — Combined activated ROIs",
-                summary=self._bin_summary_2(values.sum()),
+                title="Pixel arrival histogram â€” Combined activated ROIs",
+                summary=self._bin_summary_2(np.nansum(values)),
             )
         else:
             series = []
@@ -451,18 +455,18 @@ class WorkspaceRois(WorkspaceState):
                     self.cube.roi(
                         *(int(value) for value in self.image.rois[index])
                     ),
-                    dtype=np.uint64,
+                    dtype=count_dtype(cube.counts),
                 )
                 series.append(
                     (
-                        f"ROI {index + 1} ({int(values.sum()):,})",
+                        f"ROI {index + 1} ({int(np.nansum(values)):,})",
                         values,
                         self.image.roi_colors[index],
                     )
                 )
             self.histogram.set_series(
                 series,
-                title="Pixel arrival histogram — Activated ROIs",
+                title="Pixel arrival histogram â€” Activated ROIs",
                 summary=(
                     f"{len(active)}"
                     " active ROI"
@@ -479,7 +483,7 @@ class WorkspaceRois(WorkspaceState):
         if cube is None:
             raise RuntimeError("No decoded cube for ROI analysis")
         axes = (1, 2) if layout == "time-first" else (0, 1)
-        return cube.counts.sum(axis=axes, dtype=np.uint64)
+        return cube.counts.sum(axis=axes, dtype=count_dtype(cube.counts))
 
     def _combined_values_2(self, active, layout):
         cube = self.cube
@@ -495,7 +499,7 @@ class WorkspaceRois(WorkspaceState):
             if x0 <= x1 and y0 <= y1:
                 mask[y0 : y1 + 1, x0 : x1 + 1] = True
         bins = counts.shape[0] if layout == "time-first" else counts.shape[2]
-        result = np.zeros(bins, dtype=np.uint64)
+        result = np.zeros(bins, dtype=count_dtype(cube.counts))
         for y in range(height):
             xs = np.flatnonzero(mask[y])
             if not xs.size:
@@ -506,9 +510,13 @@ class WorkspaceRois(WorkspaceState):
             for start, end in zip(starts, ends, strict=False):
                 x0, x1 = (xs[start], xs[end] + 1)
                 if layout == "time-first":
-                    result += counts[:, y, x0:x1].sum(axis=1, dtype=np.uint64)
+                    result += counts[:, y, x0:x1].sum(
+                        axis=1, dtype=count_dtype(cube.counts)
+                    )
                 else:
-                    result += counts[y, x0:x1, :].sum(axis=0, dtype=np.uint64)
+                    result += counts[y, x0:x1, :].sum(
+                        axis=0, dtype=count_dtype(cube.counts)
+                    )
         return result
 
     def _cube_layout_2(self):
@@ -534,7 +542,7 @@ class WorkspaceRois(WorkspaceState):
 
     def _summary_2(self, values):
         return (
-            f"{int(values.sum()):,}"
+            f"{int(np.nansum(values)):,}"
             " photons | "
             f"{self._bin_width_ps():.2f}"
             " ps/bin"
@@ -557,14 +565,14 @@ class WorkspaceRois(WorkspaceState):
             values = self._all_pixel_values_2(layout)
             self.histogram.set_series(
                 [("All pixels", values, "#1769AA")],
-                title="Pixel arrival histogram — All pixels",
+                title="Pixel arrival histogram â€” All pixels",
                 summary=self._summary_2(values),
             )
         else:
             values = self._combined_values_2(active, layout)
             self.histogram.set_series(
                 [("Combined ROIs", values, "#D28A00")],
-                title="Pixel arrival histogram — Combined activated ROIs",
+                title="Pixel arrival histogram â€” Combined activated ROIs",
                 summary=self._summary_2(values),
             )
         self.image.update()

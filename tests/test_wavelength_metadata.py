@@ -193,7 +193,7 @@ def test_labels_and_export_provenance(tmp_path: Path, qapp) -> None:
     )
     ptus = export_ptu_blocks(datasets, tmp_path / "ptu")
     images = export_ics_blocks(
-        datasets, tmp_path / "ics", IcsExportOptions(bins=32)
+        datasets, tmp_path / "ics", IcsExportOptions(bins=None)
     )
     for dataset, ptu, image in zip(datasets, ptus, images, strict=True):
         assert ptu["status"] == image["status"] == "exported"

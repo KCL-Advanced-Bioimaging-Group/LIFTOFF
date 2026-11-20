@@ -223,7 +223,9 @@ class WorkspacePreview(WorkspaceState):
         self.fields["Histogram cube"].setToolTip(
             f"Arrival window excludes {cube.overflow_events:,} "
             "selected photons; "
-            "the same window policy is used for calibrated exports."
+            "Native timing exports use this window; "
+            "numeric ICS exports use a power-of-two native window "
+            "calculated from the repetition rate."
         )
         self.fields["Decoder"].setText(cube.backend)
         self.fields["Threads"].setText(str(cube.thread_count))

@@ -1,4 +1,4 @@
-# Leica Image Files Translated into Open File Formats (LIFTOFF) 3.2.2
+# Leica Image Files Translated into Open File Formats (LIFTOFF) 3.2.3
 
 LIFTOFF opens Leica LIF photon data for inspection and exports calibrated
 ICS histograms and PTU event files. The maintained source builds on the
@@ -61,7 +61,7 @@ companion PTUs. The supplied local release folders are the test discovery fallba
 they are not application dependencies. Missing real-data inputs are explicitly
 reported as skipped tests. A release acceptance run must have those inputs present.
 
-The source uses version 3.2.2. Its packaged provenance identifies the Git
+The source uses version 3.2.3. Its packaged provenance identifies the Git
 source revision, reference executable, and rebuilt native libraries. Commit future
 code changes, rebuild from this tree, run the regressions, and refresh provenance
 using `python -m tools.provenance` before packaging. An uncommitted source tree

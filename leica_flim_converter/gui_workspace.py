@@ -26,6 +26,7 @@ from .gui_workspace_channels import WorkspaceChannels
 from .gui_workspace_layout import WorkspaceLayout
 from .gui_workspace_preview import WorkspacePreview
 from .gui_workspace_rois import WorkspaceRois
+from .reflection_processing import count_array
 
 
 class MainWindow(
@@ -190,11 +191,11 @@ class MainWindow(
         if self.image.activated_rois:
             self._main_window__refresh_roi_histogram_3()
             return
-        values = np.asarray(self.cube.pixel(x, y), dtype=np.uint64)
+        values = count_array(self.cube.pixel(x, y))
         self.histogram.set_series(
             [(f"Pixel {x}, {y}", values, "#1769AA")],
             title=f"Pixel arrival histogram — Pixel {x}, {y}",
-            summary=self._bin_summary_2(values.sum()),
+            summary=self._bin_summary_2(np.nansum(values)),
         )
 
     def _main_window_clear_data_5(self) -> None:

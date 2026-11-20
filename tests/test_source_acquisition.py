@@ -22,6 +22,12 @@ from leica_flim_converter.spatial_metadata import (
 from tests.test_reference_science import example_path
 
 
+@pytest.fixture(name="raw_dataset")
+def numeric_export_dataset(raw_dataset):
+    """Use a 128-bin native period for numeric export checks."""
+    return replace(raw_dataset, laser_frequency_hz=78_125_000.0)
+
+
 def _original_xml():
     # Two channels at each of two Z planes. Misleading child settings
     # a different current focus position catch wrong scoping.

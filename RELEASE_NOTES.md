@@ -3,6 +3,21 @@
 The `validation/` paths in older entries refer to the historical evidence
 preserved in the local archive. See [Project history](developer/history/HISTORY_README.md).
 
+## 3.2.3 (source)
+
+- Derive numeric ICS export windows from the selected laser repetition rate
+  and recorded arrival clock. The actual recorded rate supplies a fallback.
+  Smaller bin counts sum whole groups of adjacent native arrival bins.
+- Add NaN, smooth interpolation, and reproducible photon simulation options
+  for reflection filtering. ICS records how each interval was treated and
+  selects a storage type that preserves integer counts and missing values.
+  PTU filtering removes reflection events and retains recorded arrival times.
+- Default the ICS export dialog to GZip, simplify its time-bin labels, and
+  align the reflection status and export metadata notes. Intensity plots
+  show pixel counts and percentile limits on the axes.
+- Speed up ICS dialog opening by reusing the resolved repetition-rate
+  metadata and limiting selection updates to relevant table changes.
+
 ## 3.2.2
 
 The maintained source was renamed to Leica Image Files Translated into
