@@ -12,7 +12,7 @@ permissions:
 jobs:
   python-quality:
     name: LIFTOFF Python quality
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
         with:
