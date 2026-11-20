@@ -26,9 +26,9 @@ source project; no historical release directory needs to be on `PYTHONPATH`.
 | Host | Compiler and runtime prerequisites | Native filenames | Certification |
 | --- | --- | --- | --- |
 | Windows x86-64 | Visual Studio C++ Build Tools and Windows SDK; Microsoft VC++ x64 runtime | `LeicaFlimDecoder.dll`, `LeicaLmsrawFilter.dll` | Both libraries rebuilt; source/clean-environment execution validated. |
-| Linux x86-64 | GCC or Clang with C++17, Ninja; matching CPython/PySide6 wheels; Qt platform-plugin system libraries | `libLeicaFlimDecoder.so`, `libLeicaLmsrawFilter.so` | Build configuration tested; compilation/runtime deferred. |
-| macOS arm64 | Xcode command-line tools/Clang, Ninja; arm64 CPython and all dependency wheels | `libLeicaFlimDecoder.dylib`, `libLeicaLmsrawFilter.dylib` | Build configuration tested; compilation/runtime/signing deferred. |
-| macOS x86-64 | Xcode command-line tools/Clang, Ninja; x86-64 CPython and all dependency wheels | Same dylib names | Build configuration tested; compilation/runtime/signing deferred. |
+| Linux x86-64 | GCC or Clang with C++17, Ninja; matching CPython/PySide6 wheels; Qt platform-plugin system libraries | `libLeicaFlimDecoder.so`, `libLeicaLmsrawFilter.so` | Hosted build and startup checks. Independent-machine validation pending. |
+| macOS arm64 | Xcode command-line tools/Clang, Ninja; arm64 CPython and all dependency wheels | `libLeicaFlimDecoder.dylib`, `libLeicaLmsrawFilter.dylib` | Hosted build and startup checks. Independent-machine validation and Developer ID signing pending. |
+| macOS x86-64 | Xcode command-line tools/Clang, Ninja; x86-64 CPython and all dependency wheels | Same dylib names | Hosted build and startup checks. Independent-machine validation and Developer ID signing pending. |
 
 Choose an OS version supported by the pinned CPython/PySide6 wheels. For Linux
 deployments, test Qt's xcb/Wayland plugins and required libraries on the minimum

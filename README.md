@@ -108,7 +108,8 @@ See the [GNU General Public License](LICENSE) for details.
 Use [CITATION.cff](CITATION.cff) to cite LIFTOFF. See [AUTHORS.md](AUTHORS.md)
 for the author list.
 
-Build support is defined for all four targets. Windows source execution and native
-rebuilding are validated. Linux/macOS compilation, runtime certification, signing,
-and notarization remain explicitly deferred. The unresolved Series006 acquisition
-remains a visible failure rather than producing an unverified result.
+GitHub Actions checks compilation and standalone startup on all four targets.
+Windows source execution and native rebuilding are validated. Independent
+Linux and macOS runtime validation, Developer ID signing, and notarization are
+pending. The unresolved Series006 acquisition remains a visible failure rather
+than producing an unverified result.
