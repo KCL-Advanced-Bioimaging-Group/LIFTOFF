@@ -13,10 +13,16 @@ from pathlib import Path
 from typing import TypedDict
 
 PLATFORMS = {
-    "standalone-Windows_x86_64": ("windows-x64", "Windows (x86-64)"),
-    "standalone-macOS_arm64": ("macos-arm64", "macOS (Apple Silicon)"),
-    "standalone-macOS_x86_64": ("macos-x64", "macOS (Intel)"),
-    "standalone-Linux_x86_64": ("linux-x64", "Linux (x86-64)"),
+    "LIFTOFF-standalone-Windows_x86_64.zip": (
+        "windows-x64",
+        "Windows (x86-64)",
+    ),
+    "LIFTOFF-standalone-macOS_arm64.zip": (
+        "macos-arm64",
+        "macOS (Apple Silicon)",
+    ),
+    "LIFTOFF-standalone-macOS_x86_64.zip": ("macos-x64", "macOS (Intel)"),
+    "LIFTOFF-standalone-Linux_x86_64.zip": ("linux-x64", "Linux (x86-64)"),
 }
 
 
@@ -29,17 +35,13 @@ class Artifact(TypedDict):
     expires_at: str
 
 
-def latest_artifacts(artifacts: list[Artifact]) -> dict[str, Artifact]:
-    """Find four usable downloads across build attempts."""
-    latest: dict[str, tuple[int, Artifact]] = {}
-    for artifact in artifacts:
-        name, _, suffix = artifact["name"].partition("-attempt-")
-        if name not in PLATFORMS or artifact["expired"]:
-            continue
-        attempt = int(suffix or "1")
-        if name not in latest or attempt > latest[name][0]:
-            latest[name] = (attempt, artifact)
-    available = {name: artifact for name, (_, artifact) in latest.items()}
+def download_artifacts(artifacts: list[Artifact]) -> dict[str, Artifact]:
+    """Find the four unexpired standalone ZIP files."""
+    available = {
+        artifact["name"]: artifact
+        for artifact in artifacts
+        if not artifact["expired"] and artifact["name"] in PLATFORMS
+    }
     missing = PLATFORMS.keys() - available.keys()
     if missing:
         raise ValueError(f"Missing usable build artifacts: {sorted(missing)}")
@@ -70,7 +72,7 @@ def write_downloads(
     output: Path, artifacts: list[Artifact], run_url: str, version: str
 ) -> None:
     """Generate the four redirects and a download index."""
-    available = latest_artifacts(artifacts)
+    available = download_artifacts(artifacts)
     index_links = []
     for name, (slug, label) in PLATFORMS.items():
         artifact = available[name]

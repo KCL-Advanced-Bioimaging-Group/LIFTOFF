@@ -15,7 +15,7 @@ import tempfile
 from importlib.metadata import distribution
 from pathlib import Path
 
-from leica_flim_converter.version import APPLICATION_VERSION
+from leica_flim_converter.version import APPLICATION_NAME, APPLICATION_VERSION
 from tools.build import RELEASE_NAME, ROOT, TARGETS
 
 RUNTIME_DISTRIBUTIONS = (
@@ -125,6 +125,34 @@ def verify_bundle(bundle: Path, executable: Path, evidence: Path) -> None:
             print(log.read_text(encoding="utf-8", errors="replace"))
 
 
+def archive_bundle(bundle: Path, archive: Path, extracted: Path) -> None:
+    """Create and extract a ZIP that preserves Unix bundle symlinks."""
+    if platform.system() == "Windows":
+        shutil.make_archive(
+            str(archive.with_suffix("")),
+            "zip",
+            root_dir=bundle.parent,
+            base_dir=bundle.name,
+        )
+        shutil.unpack_archive(archive, extracted)
+        return
+
+    for path in bundle.rglob("*"):
+        if path.is_symlink() and (
+            path.readlink().is_absolute()
+            or not path.resolve().is_relative_to(bundle)
+        ):
+            raise ValueError(f"Bundle symlink escapes the application: {path}")
+    subprocess.run(
+        ["zip", "-qry", str(archive), bundle.name],
+        cwd=bundle.parent,
+        check=True,
+    )
+    subprocess.run(
+        ["unzip", "-q", str(archive), "-d", str(extracted)], check=True
+    )
+
+
 def package(target: str) -> None:
     """Archive the full onedir build or macOS application bundle."""
     system = platform.system()
@@ -156,20 +184,9 @@ def package(target: str) -> None:
             encoding="utf-8",
         )
 
-        archive_format = "zip" if system == "Windows" else "gztar"
-        archive = Path(
-            shutil.make_archive(
-                str(staging / f"{RELEASE_NAME}_{target}"),
-                archive_format,
-                root_dir=staging,
-                base_dir=RELEASE_NAME,
-            )
-        )
+        archive = staging / f"{APPLICATION_NAME}-standalone-{target}.zip"
         extracted = staging / "extracted"
-        if archive_format == "zip":
-            shutil.unpack_archive(archive, extracted)
-        else:
-            shutil.unpack_archive(archive, extracted, filter="data")
+        archive_bundle(bundle, archive, extracted)
         verify_bundle(
             extracted / RELEASE_NAME, executable, staging / "evidence"
         )

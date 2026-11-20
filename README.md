@@ -20,8 +20,8 @@ Sign in to GitHub, then download the latest LIFTOFF build for your computer.
 - [Download for macOS (Intel)](https://kcl-advanced-bioimaging-group.github.io/LIFTOFF/downloads/macos-x64/)
 - [Download for Linux (x86-64)](https://kcl-advanced-bioimaging-group.github.io/LIFTOFF/downloads/linux-x64/)
 
-Unzip the download, then extract the application archive inside it. Open the
-application from the extracted folder and keep its files together.
+Each download is one `LIFTOFF-standalone-<platform>.zip` file. Extract it once,
+then open the application from the extracted folder. Keep its files together.
 
 These builds from `main` passed automated startup checks. The links update
 after all four builds pass. You can also scroll to **Artifacts** in a successful
