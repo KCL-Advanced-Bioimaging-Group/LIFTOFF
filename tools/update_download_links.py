@@ -1,29 +1,29 @@
-"""Prepare a README update from a successful standalone build run."""
+"""Generate download redirects for a successful standalone build."""
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
 import tomllib
-from base64 import b64encode
 from datetime import datetime
+from html import escape
 from pathlib import Path
 from typing import TypedDict
 
-START = "<!-- standalone-downloads:start -->"
-END = "<!-- standalone-downloads:end -->"
 PLATFORMS = {
-    "standalone-Windows_x86_64": "Windows (x86-64)",
-    "standalone-macOS_arm64": "macOS (Apple Silicon)",
-    "standalone-macOS_x86_64": "macOS (Intel)",
-    "standalone-Linux_x86_64": "Linux (x86-64)",
+    "LIFTOFF-standalone-Windows_x86_64.zip": (
+        "windows-x64",
+        "Windows (x86-64)",
+    ),
+    "LIFTOFF-standalone-macOS_arm64.zip": (
+        "macos-arm64",
+        "macOS (Apple Silicon)",
+    ),
+    "LIFTOFF-standalone-macOS_x86_64.zip": ("macos-x64", "macOS (Intel)"),
+    "LIFTOFF-standalone-Linux_x86_64.zip": ("linux-x64", "Linux (x86-64)"),
 }
-COMMIT_QUERY = """
-mutation($input: CreateCommitOnBranchInput!) {
-  createCommitOnBranch(input: $input) { commit { url } }
-}
-"""
 
 
 class Artifact(TypedDict):
@@ -35,83 +35,83 @@ class Artifact(TypedDict):
     expires_at: str
 
 
-def refresh_readme(
-    readme: str, artifacts: list[Artifact], run_url: str, version: str
-) -> str:
-    """Replace the marked block when all four links are available."""
-    if readme.count(START) != 1 or readme.count(END) != 1:
-        raise ValueError("Expected one pair of README download markers")
-    before, _, remainder = readme.partition(START)
-    _, end, after = remainder.partition(END)
-    if not end:
-        raise ValueError("README download markers are out of order")
-
+def download_artifacts(artifacts: list[Artifact]) -> dict[str, Artifact]:
+    """Find the four unexpired standalone ZIP files."""
     available = {
         artifact["name"]: artifact
         for artifact in artifacts
-        if not artifact["expired"]
+        if not artifact["expired"] and artifact["name"] in PLATFORMS
     }
     missing = PLATFORMS.keys() - available.keys()
     if missing:
         raise ValueError(f"Missing usable build artifacts: {sorted(missing)}")
-    links = [
-        f"- [Download for {label}]"
-        f"({run_url}/artifacts/{available[name]['id']})"
-        for name, label in PLATFORMS.items()
-    ]
-    expires = min(
-        datetime.fromisoformat(available[name]["expires_at"]).date()
-        for name in PLATFORMS
+    return available
+
+
+def write_page(path: Path, title: str, body: str, redirect: str = "") -> None:
+    """Write a complete page with an optional immediate redirect."""
+    target = escape(redirect)
+    refresh = (
+        f'<meta http-equiv="refresh" content="0; url={target}">'
+        if target
+        else ""
     )
-    return "\n".join(
-        (
-            before + START,
-            f"Sign in to GitHub, then download the LIFTOFF {version} "
-            "build for your computer.",
-            "",
-            *links,
-            "",
-            f"These download links expire on {expires.day} {expires:%B %Y}.",
-            END + after,
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        '<!doctype html>\n<html lang="en">\n<head>\n'
+        '<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, '
+        'initial-scale=1">\n'
+        f"<title>{escape(title)}</title>\n{refresh}\n</head>\n<body>\n"
+        f"<main><h1>{escape(title)}</h1>{body}</main>\n</body>\n</html>\n",
+        encoding="utf-8",
+    )
+
+
+def write_downloads(
+    output: Path, artifacts: list[Artifact], run_url: str, version: str
+) -> None:
+    """Generate the four redirects and a download index."""
+    available = download_artifacts(artifacts)
+    index_links = []
+    for name, (slug, label) in PLATFORMS.items():
+        artifact = available[name]
+        url = f"{run_url}/artifacts/{artifact['id']}"
+        expires = datetime.fromisoformat(artifact["expires_at"]).date()
+        title = f"LIFTOFF {version} for {label}"
+        body = (
+            f'<p><a href="{escape(url)}">Download for {label}</a></p>\n'
+            f"<p>Sign in to GitHub to download this build. The artifact "
+            f"expires on {expires.day} {expires:%B %Y}.</p>\n"
         )
+        write_page(
+            output / "downloads" / slug / "index.html", title, body, url
+        )
+        index_links.append(f'<li><a href="downloads/{slug}/">{label}</a></li>')
+    index_body = "<p>Sign in to GitHub to download a build.</p>\n"
+    index_body += f"<ul>{''.join(index_links)}</ul>\n"
+    write_page(
+        output / "index.html", f"LIFTOFF {version} downloads", index_body
     )
 
 
 def main() -> None:
-    """Print a guarded commit request for the README file alone."""
+    """Read GitHub artifact metadata and write the download site."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("output", type=Path)
+    args = parser.parse_args()
     repository = os.environ["GITHUB_REPOSITORY"]
     server = os.environ["GITHUB_SERVER_URL"]
     run_id = os.environ["GITHUB_RUN_ID"]
     run_url = f"{server}/{repository}/actions/runs/{run_id}"
     with Path("pyproject.toml").open("rb") as stream:
         version = tomllib.load(stream)["project"]["version"]
-    readme = Path("README.md").read_text(encoding="utf-8")
-    updated = refresh_readme(
-        readme, json.load(sys.stdin)["artifacts"], run_url, version
-    )
-    if updated == readme:
-        return
-    payload = {
-        "branch": {"repositoryNameWithOwner": repository, "refName": "main"},
-        "expectedHeadOid": os.environ["GITHUB_SHA"],
-        "message": {
-            "headline": "Refresh standalone download links",
-            "body": f"Build artifacts from {run_url}",
-        },
-        "fileChanges": {
-            "additions": [
-                {
-                    "path": "README.md",
-                    "contents": b64encode(updated.encode("utf-8")).decode(
-                        "ascii"
-                    ),
-                }
-            ]
-        },
-    }
-    json.dump(
-        {"query": COMMIT_QUERY, "variables": {"input": payload}}, sys.stdout
-    )
+    artifacts = [
+        artifact
+        for page in json.load(sys.stdin)
+        for artifact in page["artifacts"]
+    ]
+    write_downloads(args.output, artifacts, run_url, version)
 
 
 if __name__ == "__main__":

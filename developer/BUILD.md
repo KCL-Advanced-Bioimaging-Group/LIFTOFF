@@ -121,19 +121,29 @@ acceptance also requires real-data verification and independent machines.
 | Target | Runner | Application archive |
 | --- | --- | --- |
 | Windows x86-64 | `windows-2022` | ZIP with the `.exe` and `_internal` |
-| Linux x86-64 | `ubuntu-22.04` | TAR.GZ with the executable and `_internal` |
-| macOS Apple Silicon | `macos-15` | TAR.GZ with an arm64 `.app` |
-| macOS Intel | `macos-15-intel` | TAR.GZ with an x86-64 `.app` |
+| Linux x86-64 | `ubuntu-22.04` | ZIP with the executable and `_internal` |
+| macOS Apple Silicon | `macos-15` | ZIP with an arm64 `.app` |
+| macOS Intel | `macos-15-intel` | ZIP with an x86-64 `.app` |
 
 The Linux archive retains execute permissions and depends on system libraries
 such as glibc. Ubuntu 22.04 is the build environment. Compatibility with other
-distributions requires testing. The macOS archives preserve app bundle symlinks.
+distributions requires testing. Packaging on Linux and macOS uses `zip -y`
+and `unzip` to preserve symlinks and execute permissions.
 The Windows executable is unsigned, and the macOS apps use PyInstaller's
 ad-hoc signing and have no Apple notarization.
 
-Find candidate archives and their SHA-256 files under **Actions → Standalone
-builds → run → Artifacts**. GitHub keeps these downloads for the repository's
-artifact retention period. The binaries are stored outside Git history.
+Find the `LIFTOFF-standalone-<platform>.zip` candidate archives under
+**Actions → Standalone builds → run → Artifacts**. Each download is the ZIP
+created and smoke-tested by its runner. The build log records its SHA-256.
+GitHub keeps these downloads for the repository's artifact retention period.
+
+After a successful `main` push or manual build on `main`, the workflow deploys
+four GitHub Pages redirects to the corresponding Actions artifacts. The README
+uses the permanent redirect URLs. Sign in to GitHub to download the artifacts,
+which expire according to the repository's retention period. Pages publishes
+through the `github-pages` environment, restricted to `main`. Deployments run
+one at a time and check the current `main` revision before publishing. Retries
+keep the artifacts from earlier attempts available.
 
 After a successful `main` push or manual build on `main`, the workflow updates
 the marked download section in the README with all four links and their earliest
