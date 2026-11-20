@@ -13,22 +13,22 @@ dependencies in `_internal`.
 
 ## Start on Windows
 
-With the development environment installed in `.venv`, double-click
-`launch_LIFTOFF.bat`, or run:
+1. Install standard x64 CPython 3.14.10 or later in the 3.14 series. With the
+   [Python Install Manager](https://www.python.org/downloads/windows/), run
+   `pymanager install --update 3.14` in a terminal.
+2. Extract the GitHub download into a writable local folder and double-click
+   `install_packages.bat`. It installs the pinned runtime packages into
+   `.venv`, checks the native libraries, and keeps the window open with the
+   result.
+3. When installation completes, double-click `launch_LIFTOFF.bat`.
+
+You can also launch from PowerShell with the environment installed.
 
 ```powershell
-.venv\Scripts\python.exe -m leica_flim_converter
+.\.venv\Scripts\python.exe -m leica_flim_converter
 ```
 
-On a fresh Windows machine, install 64-bit CPython 3.14.10 or later in 3.14, run
-`install_packages.bat`, then launch. That helper installs the pinned development
-environment as well as the runtime. For a runtime-only installation:
-
-```powershell
-py -3.14 -m venv .venv
-.venv\Scripts\python.exe -m pip install -e .
-.venv\Scripts\python.exe validate_installation.py
-```
+For the development tools, run `.\install_packages.bat --dev` from PowerShell.
 
 The included DLLs require the Microsoft Visual C++ x64 runtime. A C++ compiler
 is only required for rebuilding them. The accepted dataset workflows and controls
