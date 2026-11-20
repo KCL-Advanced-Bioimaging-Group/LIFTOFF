@@ -22,6 +22,14 @@ def resource_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def branding_directory() -> Path:
+    """Locate the artwork in source, installed, and frozen layouts."""
+    packaged = Path(__file__).with_name("branding")
+    if packaged.is_dir():
+        return packaged
+    return resource_root() / "branding"
+
+
 def library_filename(stem: str) -> str:
     """Compute library filename."""
     system = platform.system()

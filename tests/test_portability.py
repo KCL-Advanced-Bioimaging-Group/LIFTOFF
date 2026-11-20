@@ -44,7 +44,16 @@ def test_host_build_inputs(
     assert Path(arguments[-1]).name == "launch_LIFTOFF.py"
     assert Path(arguments[-1]).is_file()
     assert "--runtime-hook" not in arguments
-    assert "--add-data" in arguments
+    data = [
+        arguments[index + 1]
+        for index, value in enumerate(arguments)
+        if value == "--add-data"
+    ]
+    for filename in ("liftoff-icon.png", "liftoff-wordmark.png"):
+        assert any(
+            entry.endswith(f"{filename}:leica_flim_converter/branding")
+            for entry in data
+        )
     if system == "Darwin":
         assert (
             arguments[arguments.index("--target-architecture") + 1] == machine

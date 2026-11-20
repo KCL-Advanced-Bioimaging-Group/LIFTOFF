@@ -20,7 +20,8 @@ dependencies in `_internal`.
    `install_packages.bat`. It installs the pinned runtime packages into
    `.venv`, checks the native libraries, and keeps the window open with the
    result.
-3. When installation completes, double-click `launch_LIFTOFF.bat`.
+3. When installation completes, double-click the **LIFTOFF** shortcut in
+   the source folder. You can also double-click `launch_LIFTOFF.bat`.
 
 You can also launch from PowerShell with the environment installed.
 

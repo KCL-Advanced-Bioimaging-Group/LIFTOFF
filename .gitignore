@@ -13,6 +13,7 @@ validation_artifacts/
 *.egg-info/
 
 # Machine-local editor settings and validation output
+/LIFTOFF.lnk
 /.codex/
 /.agents/*
 !/.agents/skills/

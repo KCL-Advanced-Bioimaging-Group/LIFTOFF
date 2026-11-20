@@ -71,7 +71,22 @@ if errorlevel 1 (
 )
 
 echo.
-echo Installation complete. You can now double-click launch_LIFTOFF.bat.
+echo Installation complete.
+powershell.exe -NoLogo -NoProfile -NonInteractive -Command ^
+  "$ErrorActionPreference = 'Stop';" ^
+  "$root = (Get-Location).ProviderPath;" ^
+  "$shell = New-Object -ComObject WScript.Shell;" ^
+  "$shortcut = $shell.CreateShortcut((Join-Path $root 'LIFTOFF.lnk'));" ^
+  "$shortcut.TargetPath = Join-Path $root 'launch_LIFTOFF.bat';" ^
+  "$shortcut.WorkingDirectory = $root;" ^
+  "$shortcut.IconLocation = (Join-Path $root 'tools\liftoff.ico') + ',0';" ^
+  "$shortcut.Description = 'Launch LIFTOFF';" ^
+  "$shortcut.Save()"
+if errorlevel 1 (
+  echo Could not create the LIFTOFF shortcut. Double-click launch_LIFTOFF.bat to start.
+) else (
+  echo Double-click the LIFTOFF shortcut to start.
+)
 pause
 popd
 exit /b 0
