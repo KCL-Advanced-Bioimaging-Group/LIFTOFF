@@ -107,6 +107,42 @@ Run from another working directory with source paths and library overrides remov
 from the environment. This complements, rather than replaces, scientific reference
 tests and independent testing on other Windows machines.
 
+## GitHub Actions builds
+
+The [Standalone builds workflow](../.github/workflows/standalone-builds.yml)
+runs on pushes to `main`, pull requests that change the build configuration,
+and manual runs on `main`. Each GitHub runner builds both native libraries from
+the same source revision and runs PyInstaller. The smoke test starts the
+extracted bundle from a separate directory and checks the frozen GUI and
+bundled libraries. Linux uses the Qt `xcb` plugin under Xvfb. Windows and macOS
+use offscreen Qt. This check covers startup and native library loading. Release
+acceptance also requires real-data verification and independent machines.
+
+| Target | Runner | Application archive |
+| --- | --- | --- |
+| Windows x86-64 | `windows-2022` | ZIP with the `.exe` and `_internal` |
+| Linux x86-64 | `ubuntu-22.04` | TAR.GZ with the executable and `_internal` |
+| macOS Apple Silicon | `macos-15` | TAR.GZ with an arm64 `.app` |
+| macOS Intel | `macos-15-intel` | TAR.GZ with an x86-64 `.app` |
+
+The Linux archive retains execute permissions and depends on system libraries
+such as glibc. Ubuntu 22.04 is the build environment. Compatibility with other
+distributions requires testing. The macOS archives preserve app bundle symlinks.
+The Windows executable is unsigned, and the macOS apps use PyInstaller's
+ad-hoc signing and have no Apple notarization.
+
+Find candidate archives and their SHA-256 files under **Actions → Standalone
+builds → run → Artifacts**. GitHub keeps these downloads for the repository's
+artifact retention period. The binaries are stored outside Git history.
+
+To prepare downloads for the Releases page, push a new `v<version>` tag on a
+reviewed `main` commit that includes this workflow. The version must match
+`pyproject.toml` and the application's version. After all four builds pass,
+GitHub checks the archives and attaches them and `SHA256SUMS.txt` to a draft
+release for that tag. Finish the [release acceptance checks](skills/leica-release-audit/references/acceptance.md)
+for the exact archives, then publish the draft. If an asset upload fails, check
+the draft before retrying. The workflow leaves existing releases intact.
+
 ## macOS signing and notarization (future release)
 
 Obtain the appropriate Developer ID Application identity and signing credentials.
