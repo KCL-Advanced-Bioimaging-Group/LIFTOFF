@@ -1,4 +1,4 @@
-# Using Leica Image Files Translated into Open File Formats (LIFTOFF) 3.2.2
+# Using Leica Image Files Translated into Open File Formats (LIFTOFF) 3.2.3
 
 Open one or more LIF files with **Open LIF files**, drag files into the window, or add
 more files to the current session. Acquisitions are grouped under their source
@@ -163,8 +163,9 @@ the chosen collision policy.
 ICS exports offer power-of-two bin counts from 16 to 32768, plus Native timing.
 Choices above the calculated native window are greyed out. **GZip** is the
 default compression, and **Uncompressed** remains available.
-Exports include JSON metadata. PTU exports
-retain native photon microtimes and include raster markers and overflow records.
+Each export includes embedded acquisition metadata, JSON provenance, a CSV
+table, and a browser-readable HTML report. PTU exports retain native photon
+microtimes and include raster markers and overflow records.
 Their macrotime is reconstructed from the raster acquisition; see the scientific
 contracts before interpreting it as a hardware timestamp. Partial acquisitions
 export only indexed data and record the actual and nominal row counts.

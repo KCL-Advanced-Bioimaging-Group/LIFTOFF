@@ -1,10 +1,10 @@
-# Leica Image Files Translated into Open File Formats (LIFTOFF) 3.2.2
+# Leica Image Files Translated into Open File Formats (LIFTOFF) 3.2.3
 
 Self-contained Windows application.
 
 ## Start the application
 
-Double-click **LIFTOFF_App_3.2.2.exe** in this folder.
+Double-click **LIFTOFF_App_3.2.3.exe** in this folder.
 
 No installation, administrator rights, Python, Qt or separate dependency
 installation is required. The application includes its Python runtime, Qt/PySide6,
@@ -61,16 +61,19 @@ its separately stored intensity thumbnail is still available.
 Use **Export PTU** for photon events or **Export ICS** for histogram image data.
 Choose the acquisitions, recorded pairs, event selection and time/Z planes in the
 export dialog. Outputs distinguish excitation sequences and detector channels.
-JSON sidecars preserve metadata, calibration and export provenance. Keep these
-sidecars with their exported files.
+Each export includes embedded acquisition metadata, JSON provenance, a CSV
+table, and a browser-readable HTML report. Keep the companion files with their
+exports.
 
-ICS and the viewer share calibrated arrival-time bins. PTU preserves native
-arrival values and labels its reconstructed or synthetic scan timeline.
+ICS defaults to **GZip** compression. Choose **Native timing** to keep the
+viewer’s arrival-time bins, or select a numeric bin count for a calibrated
+export window. PTU preserves native arrival values and labels its
+reconstructed or synthetic scan timeline.
 Emission labels use whole nanometres while sidecars retain source precision.
 
 ## What is included
 
-- **LIFTOFF_App_3.2.2.exe**: desktop application.
+- **LIFTOFF_App_3.2.3.exe**: desktop application.
 - **_internal/**: required runtime libraries, Qt plugins and application resources.
 - **THIRD_PARTY_LICENSES/**: license notices supplied with bundled dependencies.
 - **README.md**: quick-start and troubleshooting information.
