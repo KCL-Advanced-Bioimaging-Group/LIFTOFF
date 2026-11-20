@@ -135,6 +135,12 @@ Find candidate archives and their SHA-256 files under **Actions → Standalone
 builds → run → Artifacts**. GitHub keeps these downloads for the repository's
 artifact retention period. The binaries are stored outside Git history.
 
+After a successful `main` push or manual build on `main`, the workflow updates
+the marked download section in the README with all four links and their earliest
+expiry date. An older run leaves the links alone if `main` has advanced during
+the build. The update uses the workflow token, so the generated README commit
+does not trigger another build.
+
 To prepare downloads for the Releases page, push a new `v<version>` tag on a
 reviewed `main` commit that includes this workflow. The version must match
 `pyproject.toml` and the application's version. After all four builds pass,

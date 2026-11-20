@@ -13,6 +13,7 @@ dependencies in `_internal`.
 
 ## Standalone downloads
 
+<!-- standalone-downloads:start -->
 Sign in to GitHub, then download the LIFTOFF 3.2.3 build for your computer.
 
 - [Download for Windows (x86-64)](https://github.com/KCL-Advanced-Bioimaging-Group/LIFTOFF/actions/runs/44767680371/artifacts/14644129339)
@@ -20,13 +21,15 @@ Sign in to GitHub, then download the LIFTOFF 3.2.3 build for your computer.
 - [Download for macOS (Intel)](https://github.com/KCL-Advanced-Bioimaging-Group/LIFTOFF/actions/runs/44767680371/artifacts/14646282046)
 - [Download for Linux (x86-64)](https://github.com/KCL-Advanced-Bioimaging-Group/LIFTOFF/actions/runs/44767680371/artifacts/14644039121)
 
+These download links expire on 18 February 2027.
+<!-- standalone-downloads:end -->
+
 Unzip the download, then extract the application archive inside it. Open the
 application from the extracted folder and keep its files together.
 
-These builds from `main` passed automated startup checks. The download links
-expire on 18 February 2027. For newer builds, open a successful `main` run of
-the [Standalone builds workflow](https://github.com/KCL-Advanced-Bioimaging-Group/LIFTOFF/actions/workflows/standalone-builds.yml)
-and scroll to **Artifacts**.
+These builds from `main` passed automated startup checks. The links update
+after all four builds pass. You can also scroll to **Artifacts** in a successful
+`main` run of the [Standalone builds workflow](https://github.com/KCL-Advanced-Bioimaging-Group/LIFTOFF/actions/workflows/standalone-builds.yml).
 
 ## Start on Windows
 

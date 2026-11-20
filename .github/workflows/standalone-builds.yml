@@ -11,6 +11,7 @@ on:
       - 'tools/__init__.py'
       - 'tools/build.py'
       - 'tools/package_standalone.py'
+      - 'tools/update_download_links.py'
       - 'pyproject.toml'
       - 'CMakeLists.txt'
   workflow_dispatch:
@@ -89,6 +90,46 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           overwrite: true
+
+  refresh-readme:
+    name: Refresh README download links
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Commit links for the successful main build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          main_ref="repos/${GITHUB_REPOSITORY}/git/ref/heads/main"
+          head=$(gh api "$main_ref" --jq .object.sha)
+          if [[ "$head" != "$GITHUB_SHA" ]]; then
+            echo 'Main advanced during this build. A newer run can refresh the links.'
+            exit 0
+          fi
+          request="$RUNNER_TEMP/standalone-readme-update.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+            | python3 -m tools.update_download_links > "$request"
+          if [[ ! -s "$request" ]]; then
+            echo 'The README already links to these downloads.'
+            exit 0
+          fi
+          if gh api graphql --input "$request" --jq '.data.createCommitOnBranch.commit.url'; then
+            exit 0
+          fi
+          # The mutation also checks the expected parent to catch a concurrent push.
+          head=$(gh api "$main_ref" --jq .object.sha)
+          if [[ "$head" == "$GITHUB_SHA" ]]; then
+            exit 1
+          fi
+          echo 'Main advanced before the README update could be committed.'
 
   draft-release:
     name: Attach bundles to a draft release
