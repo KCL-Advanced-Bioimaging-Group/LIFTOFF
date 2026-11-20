@@ -40,11 +40,29 @@ from .gui_pair_selector import RecordedPairSelector
 from .gui_plot import HistogramPlot
 from .gui_reflection_filter import ReflectionPhotonFilter
 from .gui_workspace_state import WorkspaceState
+from .platform_paths import branding_directory
 from .version import (
     APPLICATION_FULL_NAME,
     APPLICATION_NAME,
     APPLICATION_VERSION,
 )
+
+
+def _application_wordmark() -> QLabel:
+    """Build the accessible workspace header at 48 logical pixels."""
+    label = QLabel()
+    label.setObjectName("applicationWordmark")
+    label.setAccessibleName(APPLICATION_NAME)
+    label.setAlignment(
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+    )
+    pixmap = QPixmap(str(branding_directory() / "liftoff-wordmark.png"))
+    pixmap = pixmap.scaledToHeight(
+        96, Qt.TransformationMode.SmoothTransformation
+    )
+    pixmap.setDevicePixelRatio(2)
+    label.setPixmap(pixmap)
+    return label
 
 
 def _image_view_row(image: ImageCanvas) -> QVBoxLayout:
@@ -69,6 +87,9 @@ class WorkspaceLayout(WorkspaceState):
         self._decode_failure_detail = ""
         self._decode_failure_dataset_key = None
         self.setWindowTitle(f"{APPLICATION_FULL_NAME} {APPLICATION_VERSION}")
+        self.setWindowIcon(
+            QtGui.QIcon(str(branding_directory() / "liftoff-icon.png"))
+        )
         self.resize(1500, 900)
         self.setMinimumSize(1000, 700)
         self.datasets = []
@@ -239,13 +260,14 @@ class WorkspaceLayout(WorkspaceState):
         left_column = QWidget()
         left_column_layout = QVBoxLayout(left_column)
         left_column_layout.setContentsMargins(0, 0, 0, 0)
-        title = QLabel(f"{APPLICATION_NAME} Application")
-        title.setFont(QFont("Arial", 16, QFont.Weight.DemiBold))
+        title = _application_wordmark()
         left_column_layout.addWidget(title)
         left_column_layout.addWidget(self._build_data_panel(), 1)
         splitter.addWidget(left_column)
 
-        toolbar = self._build_toolbar(title.font())
+        toolbar = self._build_toolbar(
+            QFont("Arial", 16, QFont.Weight.DemiBold)
+        )
         title.setMinimumHeight(toolbar.sizeHint().height())
         right_column = QWidget()
         right_column_layout = QVBoxLayout(right_column)

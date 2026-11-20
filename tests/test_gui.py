@@ -34,7 +34,7 @@ from leica_flim_converter.gui import (
 )
 from leica_flim_converter.gui_helpers import _draw_histogram_curves
 from leica_flim_converter.histogram import HistogramCube
-from leica_flim_converter.version import APPLICATION_VERSION
+from leica_flim_converter.version import APPLICATION_NAME, APPLICATION_VERSION
 from tests.test_reference_science import example_path
 from tests.test_repetition_rate import rate_dataset
 
@@ -148,10 +148,11 @@ def test_filter_labels_align_in_narrow_windows(
         "Leica Image Files Translated into Open File Formats "
         f"(LIFTOFF) {APPLICATION_VERSION}"
     )
-    assert any(
-        label.text() == "LIFTOFF Application"
-        for label in workspace.findChildren(QLabel)
-    )
+    wordmark = workspace.findChild(QLabel, "applicationWordmark")
+    assert wordmark is not None
+    assert wordmark.accessibleName() == APPLICATION_NAME
+    assert not wordmark.pixmap().isNull()
+    assert not workspace.windowIcon().pixmap(16, 16).isNull()
     scroll = workspace.findChild(QScrollArea, "datasetDetailsScroll")
     assert isinstance(scroll, QScrollArea)
     assert workspace.width() == 1500

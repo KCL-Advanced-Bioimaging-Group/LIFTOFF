@@ -32,12 +32,16 @@ dev = [
 LIFTOFF = "leica_flim_converter.launcher:main"
 
 [tool.setuptools]
-packages = ["leica_flim_converter"]
+packages = ["leica_flim_converter", "leica_flim_converter.branding"]
 py-modules = ["lif_flim_forensics", "patent_guided_deflate_attack", "leica_xml"]
 include-package-data = true
 
+[tool.setuptools.package-dir]
+"leica_flim_converter.branding" = "branding"
+
 [tool.setuptools.package-data]
 leica_flim_converter = ["native/*.dll", "native/*.so", "native/*.dylib", "provenance.json", "kcl_logo.png"]
+"leica_flim_converter.branding" = ["liftoff-icon.png", "liftoff-wordmark.png"]
 
 [tool.ruff]
 target-version = "py314"

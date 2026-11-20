@@ -128,6 +128,11 @@ def pyinstaller_arguments(
     for filename in ("provenance.json", "kcl_logo.png"):
         data = ROOT / "leica_flim_converter" / filename
         arguments.extend(["--add-data", f"{data}:leica_flim_converter"])
+    for filename in ("liftoff-icon.png", "liftoff-wordmark.png"):
+        data = ROOT / "branding" / filename
+        arguments.extend(
+            ["--add-data", f"{data}:leica_flim_converter/branding"]
+        )
     if target.startswith("Windows"):
         arguments.extend(
             ["--version-file", str(ROOT / "tools" / "windows_version.txt")]
