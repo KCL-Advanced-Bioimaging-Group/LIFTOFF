@@ -109,19 +109,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           main_ref="repos/${GITHUB_REPOSITORY}/git/ref/heads/main"
-          head=$(gh api "$main_ref" --jq .object.sha)
+          reference=$(gh api "$main_ref")
+          head=$(jq -er '.object.sha' <<< "$reference")
           if [[ "$head" != "$GITHUB_SHA" ]]; then
             echo 'Main advanced during this build. A newer run can refresh the links.'
             exit 0
           fi
+          branch_id=$(jq -er '.node_id' <<< "$reference")
           request="$RUNNER_TEMP/standalone-readme-update.json"
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
-            | python3 -m tools.update_download_links > "$request"
+            | LIFTOFF_MAIN_REF_ID="$branch_id" python3 -m tools.update_download_links > "$request"
           if [[ ! -s "$request" ]]; then
             echo 'The README already links to these downloads.'
             exit 0
           fi
-          if gh api graphql --input "$request" --jq '.data.createCommitOnBranch.commit.url'; then
+          if commit_url=$(gh api graphql --input "$request" --jq '.data.createCommitOnBranch.commit.url'); then
+            echo "$commit_url"
             exit 0
           fi
           # The mutation also checks the expected parent to catch a concurrent push.

@@ -92,7 +92,7 @@ def main() -> None:
     if updated == readme:
         return
     payload = {
-        "branch": {"repositoryNameWithOwner": repository, "refName": "main"},
+        "branch": {"id": os.environ["LIFTOFF_MAIN_REF_ID"]},
         "expectedHeadOid": os.environ["GITHUB_SHA"],
         "message": {
             "headline": "Refresh standalone download links",
