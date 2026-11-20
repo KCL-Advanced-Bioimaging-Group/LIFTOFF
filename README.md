@@ -11,6 +11,15 @@ were rebuilt from the included C++17 source. Standalone Windows builds from
 this tree use the name `LIFTOFF_App_<version>` and bundle their runtime
 dependencies in `_internal`.
 
+## Standalone downloads
+
+Maintainers can publish downloadable bundles on the [GitHub Releases page](https://github.com/KCL-Advanced-Bioimaging-Group/LIFTOFF/releases).
+Build candidates for Windows x86-64, Linux x86-64, Apple Silicon, and Intel Macs
+are available from successful `main` runs of the [Standalone builds workflow](https://github.com/KCL-Advanced-Bioimaging-Group/LIFTOFF/actions/workflows/standalone-builds.yml).
+Download the artifact for your platform and extract the application archive it
+contains. Keep the extracted folder together. See the
+[build and release guide](developer/BUILD.md#github-actions-builds) for details.
+
 ## Start on Windows
 
 1. Install standard x64 CPython 3.14.10 or later in the 3.14 series. With the
@@ -99,7 +108,8 @@ See the [GNU General Public License](LICENSE) for details.
 Use [CITATION.cff](CITATION.cff) to cite LIFTOFF. See [AUTHORS.md](AUTHORS.md)
 for the author list.
 
-Build support is defined for all four targets. Windows source execution and native
-rebuilding are validated. Linux/macOS compilation, runtime certification, signing,
-and notarization remain explicitly deferred. The unresolved Series006 acquisition
-remains a visible failure rather than producing an unverified result.
+GitHub Actions checks compilation and standalone startup on all four targets.
+Windows source execution and native rebuilding are validated. Independent
+Linux and macOS runtime validation, Developer ID signing, and notarization are
+pending. The unresolved Series006 acquisition remains a visible failure rather
+than producing an unverified result.
