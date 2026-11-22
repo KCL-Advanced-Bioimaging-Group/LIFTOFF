@@ -15,10 +15,10 @@ dependencies in `_internal`.
 
 Sign in to GitHub, then download the latest LIFTOFF build for your computer.
 
-- [Download for Windows (x86-64)](https://kcl-advanced-bioimaging-group.github.io/LIFTOFF/downloads/windows-x64/)
-- [Download for macOS (Apple Silicon)](https://kcl-advanced-bioimaging-group.github.io/LIFTOFF/downloads/macos-arm64/)
-- [Download for macOS (Intel)](https://kcl-advanced-bioimaging-group.github.io/LIFTOFF/downloads/macos-x64/)
-- [Download for Linux (x86-64)](https://kcl-advanced-bioimaging-group.github.io/LIFTOFF/downloads/linux-x64/)
+- [Download for Windows (x86-64)](https://github.com/KCL-Advanced-Bioimaging-Group/LIFTOFF/releases/download/Version1.0/LIFTOFF-standalone-Windows_x86_64.zip)
+- [Download for macOS (Apple Silicon)](https://github.com/KCL-Advanced-Bioimaging-Group/LIFTOFF/releases/download/Version1.0/LIFTOFF-standalone-macOS_arm64.zip)
+- [Download for macOS (Intel)](https://github.com/KCL-Advanced-Bioimaging-Group/LIFTOFF/releases/download/Version1.0/LIFTOFF-standalone-macOS_x86_64.zip)
+- [Download for Linux (x86-64)](https://github.com/KCL-Advanced-Bioimaging-Group/LIFTOFF/releases/download/Version1.0/LIFTOFF-standalone-Windows_x86_64.zip)
 
 Each download is one `LIFTOFF-standalone-<platform>.zip` file. Extract it once,
 then open the application from the extracted folder. Keep its files together.
