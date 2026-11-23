@@ -9,10 +9,11 @@ from unittest.mock import Mock
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtGui import QColor, QScreen
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
+    QDialogButtonBox,
     QFileDialog,
     QLabel,
     QMessageBox,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QScrollArea,
     QToolButton,
+    QWidget,
 )
 from pytestqt.qtbot import QtBot
 
@@ -155,6 +157,7 @@ def test_filter_labels_align_in_narrow_windows(
     assert not workspace.windowIcon().pixmap(16, 16).isNull()
     scroll = workspace.findChild(QScrollArea, "datasetDetailsScroll")
     assert isinstance(scroll, QScrollArea)
+    workspace.resize(1500, 900)
     assert workspace.width() == 1500
     assert workspace.clear_button.text() == "Clear all data"
     assert not scroll.horizontalScrollBar().isVisible()
@@ -199,6 +202,81 @@ def test_filter_labels_align_in_narrow_windows(
     )
     workspace.resize(1500, 900)
     qtbot.waitUntil(lambda: not scroll.horizontalScrollBar().isVisible())
+
+
+def test_loaded_preview_fits_small_work_area(
+    workspace: MainWindow, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep the image controls and histogram reachable on a laptop."""
+    area = QRect(0, 0, 960, 540)
+    monkeypatch.setattr(QScreen, "availableGeometry", lambda _screen: area)
+    workspace.screen().availableGeometryChanged.emit(area)
+    viewport = workspace.findChild(QScrollArea, "previewScroll")
+    details = workspace.findChild(QScrollArea, "datasetDetailsScroll")
+    toggle = workspace.findChild(QPushButton, "datasetDetailsToggle")
+    assert viewport is not None and details is not None and toggle is not None
+    qtbot.waitUntil(
+        lambda: (
+            _fits_area(workspace, area)
+            and viewport.verticalScrollBar().maximum() > 0
+        )
+    )
+    status = "Decoded frames from " + "long-source-name-" * 20 + ".lif"
+    workspace.status_label.setText(status)
+    qtbot.wait(10)
+    assert _fits_area(workspace, area)
+    assert status in workspace.status_label.toolTip()
+
+    image, contrast = workspace.image, workspace.image.contrast
+    assert not image.geometry().intersects(contrast.geometry())
+    assert details.isVisible()
+    toggle.click()
+    assert not details.isVisible()
+    toggle.click()
+    assert details.isVisible()
+
+    scrollbar = viewport.verticalScrollBar()
+    scrollbar.setValue(scrollbar.maximum())
+    plot = workspace.histogram
+    plot_bottom = plot.mapTo(viewport.viewport(), plot.rect().bottomLeft()).y()
+    assert 0 <= plot_bottom < viewport.viewport().height()
+
+
+def _fits_area(widget: QWidget, area: QRect) -> bool:
+    frame = widget.frameGeometry()
+    return frame.width() <= area.width() and frame.height() <= area.height()
+
+
+@pytest.mark.parametrize("dialog_type", [IcsExportDialog, PtuExportDialog])
+def test_export_options_scroll_above_actions(
+    dialog_type: type[IcsExportDialog] | type[PtuExportDialog],
+    raw_dataset: DatasetInfo,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep both actions accessible as the desktop work area shrinks."""
+    area = QRect(0, 0, 960, 540)
+    monkeypatch.setattr(QScreen, "availableGeometry", lambda _screen: area)
+    dialog = dialog_type([raw_dataset], {})
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitUntil(lambda: _fits_area(dialog, area))
+
+    area.setHeight(310)
+    dialog.screen().availableGeometryChanged.emit(area)
+    qtbot.waitUntil(lambda: _fits_area(dialog, area))
+    options = dialog.findChild(QScrollArea, "exportOptionsScroll")
+    assert options is not None
+    assert options.verticalScrollBar().maximum() > 0
+    for action in (
+        QDialogButtonBox.StandardButton.Ok,
+        QDialogButtonBox.StandardButton.Cancel,
+    ):
+        button = dialog.buttons.button(action)
+        assert button is not None and button.isVisible()
+        assert dialog.rect().contains(
+            button.mapTo(dialog, button.rect().center())
+        )
 
 
 def test_details_heading_clears_unselected_wavelengths(

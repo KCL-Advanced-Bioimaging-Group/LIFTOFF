@@ -65,7 +65,8 @@ def test_export_reflection_checkbox(
     checkbox_origin = control.checkbox.mapTo(dialog, QPoint())
     assert event_origin.x() == checkbox_origin.x()
     label_right = max(
-        event_label.geometry().right(), reflection_label.geometry().right()
+        label.mapTo(dialog, label.rect().topRight()).x()
+        for label in (event_label, reflection_label)
     )
     assert 0 < event_origin.x() - label_right < 15
     assert reflection_label.buddy() is control

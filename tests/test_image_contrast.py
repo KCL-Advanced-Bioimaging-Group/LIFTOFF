@@ -151,8 +151,10 @@ def test_multichannel_levels_and_reflection(qtbot, workspace):
     )
     assert contrast.levels[1] == (0, 99.8)
     original = workspace.image.image.copy()
+    chosen_white_level = contrast.white_level
+    assert chosen_white_level < 99.8
     workspace.reflection_filter.checkbox.click()
-    assert contrast.white_level < 71
+    assert contrast.white_level == chosen_white_level
     workspace.reflection_filter.checkbox.click()
     assert workspace.image.image == original
     assert workspace.decode_worker is None

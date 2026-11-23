@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -27,7 +27,7 @@ from .gui_export_reflection import (
     ExportReflectionSelection,
     add_export_filter_rows,
 )
-from .gui_export_table import ExportTableMixin, add_export_footer
+from .gui_export_table import ExportTableMixin
 from .gui_helpers import _source_groups_3
 from .gui_models import connect_signal, required_table_item
 from .ptu_export import PtuExportOptions, proposed_ptu_filenames
@@ -50,7 +50,6 @@ class PtuExportDialog(ExportTableMixin):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Export PicoQuant PTU event files")
-        self.resize(1100, 620)
         self.event_flags = EventFlagSelector(event_flag_mask, self)
         self.export_reflection = ExportReflectionSelection(
             reflection_windows, event_format=True
@@ -63,7 +62,7 @@ class PtuExportDialog(ExportTableMixin):
         self.group_rows = {}
         self.group_headers = {}
         self.header_groups = {}
-        layout = QVBoxLayout(self)
+        layout = QVBoxLayout()
         self.table = QTableWidget(0, 12)
         self.table.setHorizontalHeaderLabels(
             [
@@ -145,7 +144,7 @@ class PtuExportDialog(ExportTableMixin):
         connect_signal(
             self.source_folders.toggled, self._destination_mode_changed
         )
-        add_export_footer(layout, self.buttons)
+        self._build_export_layout(layout, self.buttons, QSize(1100, 620))
         connect_signal(self.table.itemChanged, self._row_selection_changed)
 
     def _ptu_export_dialog___init_8(self, *args, **kwargs):
