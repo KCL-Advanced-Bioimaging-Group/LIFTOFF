@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 from PySide6 import QtWidgets
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -15,10 +15,12 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -37,6 +39,7 @@ from .gui_helpers import (
     _source_export_directory_3,
 )
 from .gui_models import connect_signal, required_table_item
+from .gui_window_fit import ScreenFit
 from .mosaic import MOSAIC_INTEGRATION_ERROR
 from .raster_timing import raster_timing
 from .reflection_export import reflection_window
@@ -732,7 +735,6 @@ class ExportTableMixin(QDialog):
         """Construct shared selection and destination controls for both
         export formats.
         """
-        layout.addWidget(self.table, 1)
         selection = QHBoxLayout()
         select_all = QPushButton("Select All")
         clear = QPushButton("Clear Selection")
@@ -768,6 +770,29 @@ class ExportTableMixin(QDialog):
         )
         settings.addRow("Per-LIF folders", self.source_folders)
         return settings
+
+    def _build_export_layout(
+        self, controls: QVBoxLayout, buttons: QDialogButtonBox, size: QSize
+    ) -> None:
+        """Let the table and options scroll above the export actions."""
+        options = QWidget()
+        options.setLayout(controls)
+        controls.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setObjectName("exportOptionsScroll")
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.setSizeAdjustPolicy(
+            QScrollArea.SizeAdjustPolicy.AdjustToContents
+        )
+        scroll.setWidget(options)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.table, 1)
+        layout.addWidget(scroll)
+        add_export_footer(layout, buttons)
+        self.resize(size)
+        ScreenFit(self)
 
     def _reset_export_rows(self) -> None:
         """Reset row ownership and grouped selection before changing

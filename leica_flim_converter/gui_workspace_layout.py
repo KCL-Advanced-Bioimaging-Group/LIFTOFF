@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import os
 from abc import abstractmethod
+from html import escape
 from pathlib import Path
 
 from PySide6 import QtGui, QtWidgets
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont, QPixmap
+from PySide6.QtGui import QFont, QPaintEvent, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QSplitter,
     QStatusBar,
+    QStylePainter,
     QVBoxLayout,
     QWidget,
 )
@@ -39,6 +41,7 @@ from .gui_models import connect_signal, widget_box_layout
 from .gui_pair_selector import RecordedPairSelector
 from .gui_plot import HistogramPlot
 from .gui_reflection_filter import ReflectionPhotonFilter
+from .gui_window_fit import ScreenFit
 from .gui_workspace_state import WorkspaceState
 from .platform_paths import branding_directory
 from .version import (
@@ -75,6 +78,45 @@ def _image_view_row(image: ImageCanvas) -> QVBoxLayout:
     return layout
 
 
+def _wrapping_row(owner: QWidget) -> QFormLayout:
+    """Stack control groups when their labels cannot fit in one row."""
+    layout = QFormLayout(owner)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(4)
+    layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+    layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+    layout.setFieldGrowthPolicy(
+        QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
+    )
+    return layout
+
+
+class _StatusLabel(QLabel):
+    """Show shortened status text with the full message on hover."""
+
+    def setText(self, text: str) -> None:  # noqa: N802
+        """Keep the original text available even when it is elided."""
+        super().setText(text)
+        self.setToolTip(f"<qt>{escape(text)}</qt>")
+
+    def paintEvent(self, _event: QPaintEvent) -> None:  # noqa: N802
+        """Fit one line of text inside the assigned status area."""
+        rect = self.contentsRect()
+        text = self.fontMetrics().elidedText(
+            self.text(), Qt.TextElideMode.ElideRight, rect.width()
+        )
+        painter = QStylePainter(self)
+        painter.drawItemText(
+            rect,
+            self.alignment(),
+            self.palette(),
+            self.isEnabled(),
+            text,
+            QPalette.ColorRole.WindowText,
+        )
+        painter.end()
+
+
 # Qt window ownership and existing callbacks require named widget
 # fields.
 # pylint: disable-next=too-many-instance-attributes
@@ -91,7 +133,6 @@ class WorkspaceLayout(WorkspaceState):
             QtGui.QIcon(str(branding_directory() / "liftoff-icon.png"))
         )
         self.resize(1500, 900)
-        self.setMinimumSize(1000, 700)
         self.datasets = []
         self.cube = None
         self.loaded_sources = []
@@ -112,6 +153,7 @@ class WorkspaceLayout(WorkspaceState):
         self.open_button.setToolTip(
             "Open LIF files, or drag and drop them into the window"
         )
+        ScreenFit(self)
 
     def build_image_navigation(self, *args, **kwargs):
         """Build image navigation."""
@@ -265,9 +307,13 @@ class WorkspaceLayout(WorkspaceState):
         left_column_layout.addWidget(self._build_data_panel(), 1)
         splitter.addWidget(left_column)
 
-        toolbar = self._build_toolbar(
-            QFont("Arial", 16, QFont.Weight.DemiBold)
-        )
+        details_button = QPushButton("Details")
+        details_button.setObjectName("datasetDetailsToggle")
+        details_button.setAccessibleName("Dataset details")
+        details_button.setCheckable(True)
+        details_button.setChecked(True)
+        details_button.setToolTip("Show or hide dataset details and controls")
+        toolbar = self._build_toolbar(details_button)
         title.setMinimumHeight(toolbar.sizeHint().height())
         right_column = QWidget()
         right_column_layout = QVBoxLayout(right_column)
@@ -283,11 +329,26 @@ class WorkspaceLayout(WorkspaceState):
             "histograms"
         )
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.placeholder.setWordWrap(True)
         self.placeholder.setStyleSheet("color:#6b7280;font-size:15px")
         right_layout.addWidget(self.placeholder, 1)
-        self.workspace = QWidget()
-        workspace_layout = QVBoxLayout(self.workspace)
-        workspace_layout.setContentsMargins(0, 0, 0, 0)
+        self.workspace = self._build_preview(details_button)
+        right_layout.addWidget(self.workspace, 1)
+        splitter.addWidget(right_column)
+        splitter.setSizes([340, 1120])
+        outer.addWidget(splitter, 1)
+        self.setCentralWidget(root)
+        self._build_status_bar()
+        self.timer = QTimer(self)
+        connect_signal(self.timer.timeout, self._update_elapsed)
+        connect_signal(self.image.hovered, self.show_pixel)
+        connect_signal(self.image.hover_ended, self._refresh_roi_histogram)
+        connect_signal(self.image.roi_selected, self.show_roi)
+
+    def _build_preview(self, details_button: QPushButton) -> QScrollArea:
+        """Put a resizable image and plot in a scrollable preview."""
+        preview = QSplitter(Qt.Orientation.Vertical)
+        preview.setChildrenCollapsible(False)
         top_split = QSplitter(Qt.Orientation.Horizontal)
         top_split.setChildrenCollapsible(False)
         image_panel = QWidget()
@@ -297,7 +358,7 @@ class WorkspaceLayout(WorkspaceState):
         image_layout.addWidget(self.image_title)
         self.image = ImageCanvas()
         self.image.setMinimumWidth(328)
-        self.image.setMinimumHeight(310)
+        self.image.setMinimumHeight(240)
         image_layout.addLayout(_image_view_row(self.image), 1)
         top_split.addWidget(image_panel)
         summary_scroll = QScrollArea()
@@ -311,33 +372,38 @@ class WorkspaceLayout(WorkspaceState):
         summary_scroll.setWidget(self._build_summary_panel())
         top_split.addWidget(summary_scroll)
         top_split.setSizes([650, 410])
-        workspace_layout.addWidget(top_split, 3)
+        connect_signal(details_button.toggled, summary_scroll.setVisible)
+        preview.addWidget(top_split)
         self.histogram = HistogramPlot()
-        workspace_layout.addWidget(self.histogram, 2)
-        right_layout.addWidget(self.workspace, 1)
-        splitter.addWidget(right_column)
-        splitter.setSizes([340, 1120])
-        outer.addWidget(splitter, 1)
-        self.setCentralWidget(root)
+        preview.addWidget(self.histogram)
+        preview.setSizes([450, 300])
+        scroll = QScrollArea()
+        scroll.setObjectName("previewScroll")
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(preview)
+        return scroll
+
+    def _build_status_bar(self) -> None:
+        """Keep status and cancellation controls below the preview."""
         status = QStatusBar()
         self.setStatusBar(status)
-        self.status_label = QLabel("Ready")
+        self.status_label = _StatusLabel("Ready")
+        self.status_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.status_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         status.addWidget(self.status_label, 1)
         self.backend_label = QLabel("Decoder: not loaded")
         status.addPermanentWidget(self.backend_label)
         self.progress = QProgressBar()
-        self.progress.setFixedWidth(220)
+        self.progress.setMaximumWidth(220)
         self.progress.setRange(0, 100)
         status.addPermanentWidget(self.progress)
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.setEnabled(False)
         connect_signal(self.cancel_button.clicked, self.cancel_active)
         status.addPermanentWidget(self.cancel_button)
-        self.timer = QTimer(self)
-        connect_signal(self.timer.timeout, self._update_elapsed)
-        connect_signal(self.image.hovered, self.show_pixel)
-        connect_signal(self.image.hover_ended, self._refresh_roi_histogram)
-        connect_signal(self.image.roi_selected, self.show_roi)
 
     @abstractmethod
     def _components_ready(self) -> bool:
@@ -353,20 +419,20 @@ class WorkspaceLayout(WorkspaceState):
         panel_layout = QVBoxLayout(panel)
         header = QWidget(panel)
         header.setObjectName("dataListHeader")
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(4)
+        header_layout = _wrapping_row(header)
         heading = QLabel("Compressed data blocks")
         heading.setWordWrap(True)
-        header_layout.addWidget(heading, 1)
         self.open_button = QPushButton("Open LIF files")
         connect_signal(self.open_button.clicked, self.open_files)
-        header_layout.addWidget(self.open_button)
         self.clear_button = QPushButton("Clear all data")
         self.clear_button.setObjectName("clearAllDataButton")
         self.clear_button.setToolTip("Clear all loaded LIF files")
         connect_signal(self.clear_button.clicked, self.clear_data)
-        header_layout.addWidget(self.clear_button)
+        file_controls = QWidget()
+        _wrapping_row(file_controls).addRow(
+            self.open_button, self.clear_button
+        )
+        header_layout.addRow(heading, file_controls)
         panel_layout.addWidget(header)
         self.block_list = QListWidget()
         self.block_list.setWordWrap(True)
@@ -378,44 +444,75 @@ class WorkspaceLayout(WorkspaceState):
         panel_layout.addWidget(self.block_list)
         return panel
 
-    def _build_toolbar(self, title_font: QFont) -> QWidget:
+    def _build_toolbar(self, details_button: QPushButton) -> QWidget:
         """Construct the viewer toolbar and group attribution."""
         toolbar = QWidget()
-        layout = QHBoxLayout(toolbar)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        toolbar_layout = _wrapping_row(toolbar)
+        export_controls = QWidget()
+        export_layout = QHBoxLayout(export_controls)
+        export_layout.setContentsMargins(0, 0, 0, 0)
+        export_layout.setSpacing(4)
         self.ptu_export_button = QPushButton("Export PTU")
         self.ptu_export_button.setEnabled(False)
         connect_signal(self.ptu_export_button.clicked, self.export_ptu)
-        layout.addWidget(self.ptu_export_button)
+        export_layout.addWidget(self.ptu_export_button)
         self.export_button = QPushButton("Export ICS")
         self.export_button.setEnabled(False)
         connect_signal(self.export_button.clicked, self.export_ics)
-        layout.addWidget(self.export_button)
+        export_layout.addWidget(self.export_button)
+
+        viewer_controls = QWidget()
+        view_layout = QHBoxLayout(viewer_controls)
+        view_layout.setContentsMargins(0, 0, 0, 0)
+        view_layout.setSpacing(4)
         thread_label = QLabel("Threads")
-        layout.addWidget(thread_label)
+        view_layout.addWidget(thread_label)
         self.thread_spin = QSpinBox()
         self.thread_spin.setAccessibleName(thread_label.text())
         self.thread_spin.setRange(1, max(1, os.cpu_count() or 1))
         self.thread_spin.setValue(min(16, max(1, os.cpu_count() or 1)))
-        layout.addWidget(self.thread_spin)
+        self.thread_spin.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
+        view_layout.addWidget(self.thread_spin)
         self.thread_spin.setToolTip(
             "Applies to native compressed and LMSRAW histograms. "
             "PTU and Python fallback use one worker."
         )
+        view_layout.addWidget(details_button)
+        view_layout.addStretch()
+        controls = QWidget()
+        controls.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+        )
+        controls_layout = _wrapping_row(controls)
+        controls_layout.setFormAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        controls_layout.addRow(export_controls, viewer_controls)
+        toolbar_layout.addRow(controls, self._build_attribution())
+        return toolbar
+
+    @staticmethod
+    def _build_attribution() -> QWidget:
+        """Keep the affiliation together when the toolbar wraps."""
+        branding = QWidget()
+        layout = QHBoxLayout(branding)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
         layout.addStretch()
-        attribution = QLabel("Advanced Imaging Group, KCL")
-        attribution.setFont(title_font)
+        attribution = QLabel("Advanced Image Group")
+        attribution.setFont(QFont("Arial", 16, QFont.Weight.DemiBold))
+        attribution.setWordWrap(True)
         attribution.setStyleSheet("color: #666666")
-        layout.addWidget(attribution)
-        layout.addSpacing(4)
+        layout.addWidget(attribution, alignment=Qt.AlignmentFlag.AlignVCenter)
         logo = QLabel()
         logo.setAccessibleName("King’s College London")
         logo.setPixmap(QPixmap(str(Path(__file__).with_name("kcl_logo.png"))))
         logo.setFixedSize(63, 48)
         logo.setScaledContents(True)
-        layout.addWidget(logo)
-        return toolbar
+        layout.addWidget(logo, alignment=Qt.AlignmentFlag.AlignVCenter)
+        return branding
 
     def _build_summary_panel(self) -> QWidget:
         """Construct calibrated dataset details and synchronized plane

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QStandardItemModel
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -27,7 +27,7 @@ from .gui_export_reflection import (
     ExportReflectionSelection,
     add_export_filter_rows,
 )
-from .gui_export_table import ExportTableMixin, add_export_footer
+from .gui_export_table import ExportTableMixin
 from .gui_helpers import _source_groups_3
 from .gui_models import connect_signal, required_table_item
 from .ics import ALLOWED_BINS, proposed_ics_filenames
@@ -51,7 +51,6 @@ class IcsExportDialog(ExportTableMixin):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Export ICS decay stacks")
-        self.resize(1120, 620)
         self.event_flags = EventFlagSelector(event_flag_mask, self)
         self.export_reflection = ExportReflectionSelection(reflection_windows)
         self.active_event_flag_mask = event_flag_mask
@@ -65,7 +64,7 @@ class IcsExportDialog(ExportTableMixin):
         self.dimension_mode = QComboBox()
         self.dimension_mode.addItem("Split detector/tile/T/Z planes", "split")
         self.dimension_mode.addItem("Integrate T/Z per detector", "integrate")
-        layout = QVBoxLayout(self)
+        layout = QVBoxLayout()
         self.table = QTableWidget(0, 13)
         self.table.setHorizontalHeaderLabels(
             [
@@ -148,7 +147,7 @@ class IcsExportDialog(ExportTableMixin):
             self.dimension_mode.currentIndexChanged,
             self._dimension_mode_changed,
         )
-        add_export_footer(layout, self.buttons)
+        self._build_export_layout(layout, self.buttons, QSize(1120, 620))
         connect_signal(self.table.itemChanged, self._row_selection_changed)
 
     def _ics_export_dialog___init_8(self, *args, **kwargs):
