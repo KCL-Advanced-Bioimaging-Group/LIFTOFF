@@ -145,6 +145,12 @@ through the `github-pages` environment, restricted to `main`. Deployments run
 one at a time and check the current `main` revision before publishing. Retries
 keep the artifacts from earlier attempts available.
 
+After a successful `main` push or manual build on `main`, the workflow updates
+the marked download section in the README with all four links and their earliest
+expiry date. An older run leaves the links alone if `main` has advanced during
+the build. The update uses the workflow token, so the generated README commit
+does not trigger another build.
+
 To prepare downloads for the Releases page, push a new `v<version>` tag on a
 reviewed `main` commit that includes this workflow. The version must match
 `pyproject.toml` and the application's version. After all four builds pass,
