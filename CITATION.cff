@@ -26,3 +26,4 @@ title: "LIFTOFF: Leica Image Files Translated into Open File Formats"
 version: "3.2.3"
 license: GPL-3.0-only
 repository-code: "https://github.com/KCL-Advanced-Bioimaging-Group/LIFTOFF"
+[![DOI](https://zenodo.org/badge/1455507093.svg)](https://doi.org/10.5281/zenodo.24442152)
